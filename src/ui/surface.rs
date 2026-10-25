@@ -30,6 +30,9 @@ pub struct Surface {
     pub visible: bool,
     /// Extra render scale on top of the monitor DPI (main bubble fit-to-box).
     pub zoom: f32,
+    compact: Option<bool>,
+    transition: Option<super::morph::Transition>,
+    visual_pos: (i32, i32),
 }
 
 impl Surface {
@@ -71,6 +74,9 @@ impl Surface {
                 alpha: 255,
                 visible: false,
                 zoom: 1.0,
+                compact: None,
+                transition: None,
+                visual_pos: (0, 0),
             })
         }
     }
@@ -88,6 +94,34 @@ impl Surface {
         self.size = layout_root(&mut root, max, &ctx);
         self.root = Some(root);
     }
+
+    pub fn set_root_quiet(&mut self, gfx: &Gfx, root: El, max: (f32, f32), compact: bool, animated: bool) {
+        use super::morph::{self, Frame, Transition};
+        let changed = self.compact.replace(compact).is_some_and(|old| old != compact);
+        if !animated { self.transition = None; }
+        if changed && animated && self.visible {
+            let now = crate::util::time::now_ms();
+            let old_frame = Frame { size: self.size, pos: (self.pos.0 as f32, self.pos.1 as f32) };
+            if let Some(old) = self.root.take() {
+                let (from, from_radius, old, scene_frame, old_alpha) = match self.transition.take() {
+                    Some(previous) => {
+                        let t = previous.progress(now);
+                        let from = previous.frame(old_frame, now);
+                        let r = previous.from_radius + (morph::radius(&old) - previous.from_radius) * morph::ease(t);
+                        let (a, b) = morph::weights(t);
+                        if a * previous.old_alpha > b {
+                            (from, r, previous.old, previous.old_frame, a * previous.old_alpha)
+                        } else { (from, r, old, old_frame, b) }
+                    }
+                    None => (old_frame, morph::radius(&old), old, old_frame, 1.0),
+                };
+                self.transition = Some(Transition { old, old_frame: scene_frame, from, from_radius, old_alpha, started: now, duration: if compact { 280.0 } else { 320.0 } });
+            }
+        }
+        self.set_root(gfx, root, max);
+    }
+
+    pub fn transitioning(&self) -> bool { self.transition.is_some() }
 
     /// Lays out `root` into a fixed DIP size (resizable windows).
     pub fn set_root_fixed(&mut self, gfx: &Gfx, mut root: El, size: (f32, f32)) {
@@ -140,7 +174,12 @@ impl Surface {
     /// Renders the current root and composites it at `pos` (physical pixels).
     pub fn render(&mut self, gfx: &Gfx, state: &DrawState) {
         let Some(root) = self.root.take() else { return };
-        let (w, h) = self.px_size();
+        let now = crate::util::time::now_ms();
+        if self.transition.as_ref().is_some_and(|t| t.progress(now) >= 1.0) { self.transition = None; }
+        let target = super::morph::Frame { size: self.size, pos: (self.pos.0 as f32, self.pos.1 as f32) };
+        let frame = self.transition.as_ref().map(|t| t.frame(target, now)).unwrap_or(target);
+        self.visual_pos = (frame.pos.0.round() as i32, frame.pos.1.round() as i32);
+        let (w, h) = ((frame.size.0 * self.scale).ceil().max(1.0) as i32, (frame.size.1 * self.scale).ceil().max(1.0) as i32);
         if !self.ensure_buffer(w, h) {
             self.root = Some(root);
             return;
@@ -155,7 +194,10 @@ impl Surface {
                 self.target.SetDpi(96.0 * self.scale, 96.0 * self.scale);
                 self.target.BeginDraw();
                 self.target.Clear(Some(&super::color::Color::argb(0, 0, 0, 0).d2d(1.0)));
-                self.painter.draw(&root, gfx, state);
+                if let Some(t) = &self.transition {
+                    let offset = |pos: (f32, f32)| ((pos.0 - frame.pos.0) / self.scale, (pos.1 - frame.pos.1) / self.scale);
+                    super::morph::draw(&mut self.painter, gfx, &t.old, &root, frame.size, offset(t.old_frame.pos), offset(target.pos), t.progress(now), t.from_radius, t.old_alpha, state);
+                } else { self.painter.draw(&root, gfx, state); }
                 if let Err(error) = self.target.EndDraw(None, None) {
                     crate::util::log::write(format!("EndDraw failed: {error}"));
                     // Device loss cannot happen for a software target, but a
@@ -172,7 +214,7 @@ impl Surface {
         let (w, h) = self.px;
         unsafe {
             let screen = GetDC(None);
-            let pos = POINT { x: self.pos.0, y: self.pos.1 };
+            let pos = if self.transition.is_some() { POINT { x: self.visual_pos.0, y: self.visual_pos.1 } } else { POINT { x: self.pos.0, y: self.pos.1 } };
             let size = SIZE { cx: w, cy: h };
             let src = POINT { x: 0, y: 0 };
             let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: self.alpha, AlphaFormat: AC_SRC_ALPHA as u8 };
@@ -241,5 +283,53 @@ impl Drop for Surface {
             let _ = DeleteDC(self.mem_dc);
             let _ = DestroyWindow(self.hwnd);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::{color::Color, hud, layout::{Paint, Th}};
+    use windows::core::w;
+    use windows::Win32::System::Com::*;
+
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: windows::Win32::Foundation::WPARAM, lp: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
+        unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+    }
+
+    #[test]
+    fn quiet_transition_renders_resizes_and_reverses_in_a_hidden_window() {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(proc), lpszClassName: w!("AgentMonitorHUD.QuietMotionTest"), ..Default::default() });
+        }
+        let gfx = Gfx::new().unwrap();
+        let mut surface = Surface::create(&gfx, w!("AgentMonitorHUD.QuietMotionTest"), "", WS_EX_TOOLWINDOW, None).unwrap();
+        let scene = |compact| {
+            let content = if compact { El::ellipse(Paint::Solid(Color::argb(255, 142, 142, 147)), 6.0) }
+                else { El::text("Stable text size", hud::font(hud::UI_FAMILY, 14.0, 500), Paint::Solid(Color::argb(255, 255, 255, 255))).w(440.0).h(90.0) };
+            El::panel().child(El::panel().m(Th::all(18.0)).child(El::border(Paint::Solid(Color::argb(255, 25, 25, 30)), Paint::None, 0.0, if compact { 10.0 } else { 22.0 }).p(Th::new(12.0, 7.0, 12.0, 7.0)).child(content)))
+        };
+        let fx = |_: u64| None;
+        let custom = |_: &mut Painter, _: u32, _: crate::ui::layout::Rect| {};
+        let state = DrawState { hovered: 0, pressed: 0, fx: &fx, custom: &custom };
+        surface.set_root_quiet(&gfx, scene(false), (1000.0, 400.0), false, true);
+        surface.render(&gfx, &state);
+        let expanded = surface.px;
+        // Keep the HWND hidden; this flag only enables the renderer's transition.
+        surface.visible = true;
+        surface.set_root_quiet(&gfx, scene(true), (1000.0, 400.0), true, true);
+        surface.transition.as_mut().unwrap().started -= 100;
+        surface.render(&gfx, &state);
+        let middle = surface.px;
+        assert!(middle.0 < expanded.0 && middle.0 > surface.px_size().0);
+        assert_ne!(unsafe { GetPixel(surface.mem_dc, middle.0 / 2, middle.1 / 2) }.0, 0, "nested bubble shells must paint during the transition");
+        surface.set_root_quiet(&gfx, scene(false), (1000.0, 400.0), false, true);
+        surface.render(&gfx, &state);
+        assert!((surface.px.0 - middle.0).abs() < 40, "reversal must continue from the current width");
+        surface.transition.as_mut().unwrap().started -= 1000;
+        surface.render(&gfx, &state);
+        assert!(!surface.transitioning());
+        assert_eq!(surface.px, expanded);
     }
 }

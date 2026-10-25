@@ -263,6 +263,9 @@ pub struct View {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AccountView {
+    pub codex_five_hour_remaining: Option<f64>,
+    pub codex_weekly_remaining: Option<f64>,
+    pub codex_at: Option<i64>,
     pub claude_five_hour_remaining: Option<f64>,
     pub claude_weekly_remaining: Option<f64>,
     pub claude_at: Option<i64>,
@@ -389,16 +392,20 @@ impl Engine {
     }
 
     pub fn update_settings(&mut self, settings: Settings) {
+        let context_changed = settings.context_alerts_enabled != self.settings.context_alerts_enabled
+            || settings.context_thresholds != self.settings.context_thresholds;
         if settings.pricing_path != self.settings.pricing_path {
             self.pricing = pricing::Catalog::load(&settings.pricing_path, &self.paths.home);
         }
         self.settings = settings;
         for task in self.tasks.values_mut() {
-            task.context_level = 0;
-            task.context_alert_until = MIN;
-            if task.attention_reason == "context" {
-                task.attention_reason = "";
-                task.attention_until = MIN;
+            if context_changed {
+                task.context_level = 0;
+                task.context_alert_until = MIN;
+                if task.attention_reason == "context" {
+                    task.attention_reason = "";
+                    task.attention_until = MIN;
+                }
             }
             if let Some(snapshot) = task.snapshot.as_mut() {
                 snapshot.cost_usd = self.pricing.estimate(snapshot);
@@ -560,8 +567,12 @@ impl Engine {
     }
 
     fn account_view(&self, now: i64) -> AccountView {
+        let (codex_five, codex_week, codex_at) = codex_allowance(self.tasks.values(), self.official_allowance.as_ref());
         let (five, week, at) = self.claude_quota.remaining(now);
         AccountView {
+            codex_five_hour_remaining: codex_five,
+            codex_weekly_remaining: codex_week,
+            codex_at,
             claude_five_hour_remaining: five,
             claude_weekly_remaining: week,
             claude_at: at,
@@ -1399,21 +1410,11 @@ impl Engine {
             latest.active_tasks = snapshots.len();
             latest
         };
-        // Allowance belongs to the Codex account only: never derived from Claude
-        // or DeepSeek Harness tasks, and the signed-in official reading wins over log values.
-        let codex: Vec<&Task> = keys.iter().map(|k| &self.tasks[k]).filter(|t| t.source == Source::Codex).collect();
-        let latest = |pick: fn(&Task) -> Option<(f64, i64)>| codex.iter().filter_map(|t| pick(t)).max_by_key(|(_, at)| *at);
-        let mut weekly = latest(|t| t.weekly);
-        let mut five = latest(|t| t.five_hour);
-        if let Some(official) = &self.official_allowance {
-            if official.weekly.is_some() || official.five_hour.is_some() {
-                weekly = official.weekly.map(|v| (v, official.at)).or(weekly);
-                five = official.five_hour.map(|v| (v, official.at)).or(five);
-            }
-        }
-        display.weekly_remaining = weekly.map(|w| w.0);
-        display.five_hour_remaining = five.map(|f| f.0);
-        display.allowance_at = weekly.map(|w| w.1).max(five.map(|f| f.1));
+        // Account readings are shared with settings, independent of task visibility.
+        let (five, weekly, at) = codex_allowance(self.tasks.values(), self.official_allowance.as_ref());
+        display.weekly_remaining = weekly;
+        display.five_hour_remaining = five;
+        display.allowance_at = at;
         // Claude's plan usage is account-level too, from the desktop app's samples.
         let (claude_five, claude_week, claude_at) = self.claude_quota.remaining(time::now_ms());
         display.claude_five_hour_remaining = claude_five;
@@ -1504,6 +1505,92 @@ fn resolve_client(value: &str, profile: Option<&codex::Profile>) -> &'static str
         "vscode" => "vscode",
         "cli" => "cli",
         _ => profile.map(|p| p.default_client).unwrap_or("unknown"),
+    }
+}
+
+/// Only OpenAI Codex readings contribute; the signed-in official reading wins.
+fn codex_allowance<'a>(tasks: impl Iterator<Item = &'a Task>, official: Option<&allowance::Official>) -> (Option<f64>, Option<f64>, Option<i64>) {
+    let mut weekly = None;
+    let mut five = None;
+    for task in tasks.filter(|t| t.source == Source::Codex && t.profile != codex::DEEPSEEK_PROFILE && matches!(t.provider.as_str(), "" | "openai")) {
+        if let Some(value) = task.weekly {
+            if weekly.is_none_or(|(_, at)| value.1 > at) {
+                weekly = Some(value);
+            }
+        }
+        if let Some(value) = task.five_hour {
+            if five.is_none_or(|(_, at)| value.1 > at) {
+                five = Some(value);
+            }
+        }
+    }
+    if let Some(official) = official {
+        weekly = official.weekly.map(|v| (v, official.at)).or(weekly);
+        five = official.five_hour.map(|v| (v, official.at)).or(five);
+    }
+    (five.map(|f| f.0), weekly.map(|w| w.0), weekly.map(|w| w.1).max(five.map(|f| f.1)))
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+
+    #[test]
+    fn appearance_changes_do_not_reset_context_reminders() {
+        let root = std::env::temp_dir().join(format!("hud-settings-unit-{}", std::process::id()));
+        let paths = HudPaths {
+            plugin_root: root.clone(), state_root: root.join("state"), config_path: root.join("settings.json"),
+            home: root.clone(), codex_home: root.join("codex"), deepseek_home: root.join("deepseek"),
+            claude_root: root.join("claude"), dsh_root: root.join("dsh"),
+        };
+        let mut settings = Settings::from(&crate::config::defaults());
+        settings.context_alerts_enabled = true;
+        let mut engine = Engine::new(paths, settings.clone());
+        let mut task = Task::new("sample".into(), PathBuf::new(), Source::Codex, codex::DEFAULT_PROFILE, 1, FileStamp::default());
+        task.context_level = 2;
+        task.context_alert_until = 50_000;
+        task.attention_reason = "context";
+        task.attention_until = 50_000;
+        engine.tasks.insert(task.key.clone(), task);
+        settings.font_size = 18.0;
+        engine.update_settings(settings.clone());
+        assert_eq!(engine.tasks["sample"].context_level, 2);
+        assert_eq!(engine.tasks["sample"].attention_until, 50_000);
+        settings.context_alerts_enabled = false;
+        engine.update_settings(settings);
+        assert_eq!(engine.tasks["sample"].context_level, 0);
+        assert_eq!(engine.tasks["sample"].attention_until, MIN);
+    }
+
+    #[test]
+    fn codex_account_uses_latest_windows_and_excludes_other_providers() {
+        let task = || Task::new(String::new(), PathBuf::new(), Source::Codex, codex::DEFAULT_PROFILE, 1, FileStamp::default());
+        let mut older = task();
+        older.five_hour = Some((80.0, 1000));
+        older.weekly = Some((70.0, 1000));
+        let mut newer = task();
+        newer.five_hour = Some((60.0, 2000));
+        newer.weekly = None;
+        // A hidden/dismissed task still carries an account-level reading.
+        newer.dismissed = true;
+        let mut deepseek = task();
+        deepseek.profile = codex::DEEPSEEK_PROFILE;
+        deepseek.five_hour = Some((1.0, 9000));
+        let mut claude = task();
+        claude.profile = codex::DEFAULT_PROFILE;
+        claude.source = Source::Claude;
+        claude.five_hour = Some((1.0, 9000));
+        let mut custom = task();
+        custom.profile = codex::DEFAULT_PROFILE;
+        custom.provider = "deepseek".into();
+        custom.five_hour = Some((1.0, 9000));
+        let tasks = [&older, &newer, &deepseek, &claude, &custom];
+        assert_eq!(codex_allowance(tasks.into_iter(), None), (Some(60.0), Some(70.0), Some(2000)));
+
+        let official = allowance::Official { at: 3000, five_hour: None, weekly: Some(55.0) };
+        assert_eq!(codex_allowance(tasks.into_iter(), Some(&official)), (Some(60.0), Some(55.0), Some(3000)));
+        assert_eq!(codex_allowance(std::iter::empty(), Some(&official)), (None, Some(55.0), Some(3000)));
+        assert_eq!(codex_allowance(std::iter::empty(), None), (None, None, None));
     }
 }
 

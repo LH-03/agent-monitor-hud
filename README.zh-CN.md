@@ -7,8 +7,8 @@
 
 ![主气泡：活动节奏 + 额度分组](docs/images/hud-rhythm-dark.png)
 
-> **4.0 是一次彻底重写。** 3.x 的 C#/WPF 程序（外加打包的 .NET 运行时和 Node.js MCP 宿主）由
-> **Claude Opus 5.5**（Anthropic）在 Claude Code 中用 Rust 从零重写为单个原生可执行文件。外观、
+> **4.0 是一次彻底重写。** 3.x 的 C#/WPF 程序（外加打包的 .NET 运行时和 Node.js MCP 宿主）
+> 用 Rust 从零重写为单个原生可执行文件。外观、
 > 设置和插件 ID 都保持不变。
 
 HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，不再打包 .NET 运行时、Node.js

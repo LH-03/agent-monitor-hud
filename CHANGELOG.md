@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.0.1 - Settings, account refresh and layout polish
+
+- Fix DeepSeek balance updates remaining stuck in an already-open settings window.
+  Show Codex 5-hour and weekly allowance in settings using the shared account readings.
+- Add native previews for the main bubble, task list, detached bubbles, quiet indicators
+  and messages, including local animation replay.
+- Clarify settings labels and scope, preserve pending edits when closing settings, and
+  fix display-mode overrides and detached-bubble limits.
+- Rework all three density presets around consistent padding and gaps. Keep typography,
+  identity lines and displayed fields unchanged across presets; align list columns by
+  measured content and simplify badge and button chrome.
+- Use a small quiet indicator with smooth, reversible native collapse/expand transitions.
+- Fix context reminder targets and preserve reminder progress through appearance changes.
+
 ## 4.0.0 - Agent Monitor HUD: native Rust rewrite
 
 Rewritten from scratch in Rust by Claude Opus 5.5 (Anthropic) in Claude Code, with the maintainer

@@ -11,7 +11,7 @@ use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const VERSION: &str = "4.0.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const INSTRUCTIONS: &str = "Agent Monitor HUD is a local, closed-world HUD control server for Codex, Claude Code and DeepSeek Harness. Before a proactive notice, call monitor_hud_notification_capabilities and match task_number plus agent/client/workspace to the current task. When the user enables a capacity guard, call monitor_hud_quota_guard at natural checkpoints and before expensive work; a low result means write a recoverable handoff, not that the HUD can interrupt a running turn. Never include secrets, credentials, prompts, replies, or full logs. Notices require user opt-in and are limited to 160 plain-text characters. Control tools affect only the local HUD.";
 

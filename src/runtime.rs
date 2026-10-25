@@ -275,16 +275,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
         let quota_value = quota.build(&engine.settings, &locale, view.display.as_ref());
         registry::write(&registry_path, &engine.registry_tasks(now), &quota_value, &mut registry_cache, now);
 
-        let differs = match &last_view {
-            Some(previous) => {
-                previous.tasks != view.tasks
-                    || previous.overall_status != view.overall_status
-                    || previous.display != view.display
-                    || previous.paused != view.paused
-                    || previous.initial_scan_complete != view.initial_scan_complete
-            }
-            None => true,
-        };
+        let differs = last_view.as_ref().is_none_or(|previous| view_changed(previous, &view));
         if differs {
             if last_view.as_ref().is_none_or(|p| p.tasks.len() != view.tasks.len() || p.overall_status != view.overall_status) {
                 crate::util::log::write(format!(
@@ -300,6 +291,46 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
             responsive_until = responsive_until.max(now + 2000);
             notify();
         }
+    }
+}
+
+fn view_changed(previous: &View, view: &View) -> bool {
+    previous.tasks != view.tasks
+        || previous.overall_status != view.overall_status
+        || previous.display != view.display
+        || previous.account != view.account
+        || previous.paused != view.paused
+        || previous.initial_scan_complete != view.initial_scan_complete
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publishes_account_updates_without_visible_tasks() {
+        let pending = View::default();
+        let mut ready = pending.clone();
+        ready.account.dsh_balance = Some("CNY 12.34".into());
+        ready.account.dsh_at = Some(1000);
+        assert!(view_changed(&pending, &ready));
+        assert!(!view_changed(&ready, &ready));
+
+        let mut failed = ready.clone();
+        failed.account.dsh_failure = Some("network");
+        assert!(view_changed(&ready, &failed));
+        assert!(view_changed(&failed, &ready));
+        assert!(view_changed(&ready, &pending));
+
+        let mut refreshed = ready.clone();
+        refreshed.account.dsh_at = Some(2000);
+        assert!(view_changed(&ready, &refreshed));
+
+        let mut codex = pending.clone();
+        codex.account.codex_five_hour_remaining = Some(61.0);
+        codex.account.codex_weekly_remaining = Some(78.0);
+        codex.account.codex_at = Some(3000);
+        assert!(view_changed(&pending, &codex));
     }
 }
 

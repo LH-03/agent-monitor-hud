@@ -5,6 +5,7 @@
 pub mod edit;
 pub mod pages;
 pub mod picker;
+mod preview;
 pub mod widgets;
 
 use super::app::App;
@@ -36,8 +37,10 @@ pub const SETTINGS_CLASS: PCWSTR = w!("AgentMonitorHUD.Settings");
 const TIMER_CARET: usize = 21;
 const TIMER_TIP: usize = 22;
 const TIMER_SAVE: usize = 23;
+const TIMER_SAMPLE: usize = 24;
 const CUSTOM_ROOT: u32 = 1;
 const CUSTOM_VIEWPORT: u32 = 2;
+const CUSTOM_SAMPLE: u32 = 3;
 /// Gutter reserved for the slim scroll thumb when a page overflows.
 const SCROLLBAR: f32 = 12.0;
 const THUMB_W: f32 = 6.0;
@@ -96,7 +99,12 @@ pub struct SettingsWindow {
     /// Last four characters of the stored DeepSeek key.
     key_hint: Option<String>,
     balance_status: String,
+    codex_quota: String,
     claude_quota: String,
+    sample: Option<preview::Sample>,
+    sample_kind: u8,
+    sample_open: bool,
+    sample_started: i64,
 }
 
 pub fn register_classes(instance: HINSTANCE, icon: HICON, cursor: HCURSOR) {
@@ -147,7 +155,13 @@ impl SettingsWindow {
     }
 
     /// Persists anything pending before the process exits.
-    pub fn flush(&mut self, _paths: &crate::paths::HudPaths) {}
+    pub fn flush(&mut self, app: &mut App) {
+        self.set_focus(app, None);
+        if self.save_pending {
+            app.save_settings();
+            self.save_pending = false;
+        }
+    }
 }
 
 pub fn open(app: &mut App) {
@@ -178,7 +192,7 @@ pub fn open(app: &mut App) {
         tip_pending: None,
         popup: None,
         picker: None,
-        size: (880.0, 660.0),
+        size: (960.0, 760.0),
         tab: 0,
         scroll: [0.0; 6],
         expanded: HashSet::new(),
@@ -200,7 +214,12 @@ pub fn open(app: &mut App) {
         themes: themes::load_all(&app.paths.user_themes_dir()),
         key_hint: crate::secrets::deepseek_key_hint(&app.paths),
         balance_status: String::new(),
+        codex_quota: String::new(),
         claude_quota: String::new(),
+        sample: None,
+        sample_kind: 0,
+        sample_open: false,
+        sample_started: 0,
     };
     window.texts.insert(TextKey::ApiKey, TextEdit::new("", false, 200));
     window.status = app.catalog.settings_locale(&app.settings.language).get("livePreview").to_string();
@@ -210,8 +229,10 @@ pub fn open(app: &mut App) {
     let monitor = super::app::monitor_for_window(window.surface.hwnd);
     window.surface.refresh_dpi();
     let scale = window.surface.scale;
-    let (w, h) = ((window.size.0 * scale) as i32, (window.size.1 * scale) as i32);
     let work = monitor.work;
+    window.size.0 = window.size.0.min((work.right - work.left) as f32 / scale - 24.0);
+    window.size.1 = window.size.1.min((work.bottom - work.top) as f32 / scale - 24.0);
+    let (w, h) = ((window.size.0 * scale) as i32, (window.size.1 * scale) as i32);
     window.surface.pos = (work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2);
     window.render(app);
     window.surface.show(true);
@@ -353,12 +374,35 @@ impl SettingsWindow {
 
     /// Every user change marks the look as custom, saves, and previews live.
     fn changed(&mut self, app: &mut App) {
-        app.document["preset"] = Value::from("custom");
+        if self.tab == 1 { app.document["preset"] = Value::from("custom"); }
         app.save_settings();
         self.render_app(app);
         let loc = self.loc(app);
         self.status = format!("{}  {}", loc.get("savedAt"), time::local_hms(time::now_ms()));
         self.status_tip.clear();
+        if self.tab == 4 && self.sample_open { self.replay_sample(); }
+    }
+
+    fn replay_sample(&mut self) {
+        self.sample_started = time::now_ms();
+        unsafe { SetTimer(Some(self.surface.hwnd), TIMER_SAMPLE, 33, None); }
+    }
+
+    fn sample_for_path(&mut self, path: &[&str]) {
+        if matches!(path, ["multiTask", "listDensity" | "nameMode"]) { self.sample_open = true; return; }
+        let kind = match path {
+            ["layout"] | ["numberFormat"] | ["monitorScope"] => Some(0),
+            ["fields", _] => Some(0),
+            ["multiTask", "bubbleFields", _] | ["multiTask", "maxSplitBubbles"] | ["multiTask", "autoSplitNewTasks"] => Some(2),
+            ["multiTask", ..] => Some(1),
+            ["behavior", "idleIndicator", ..] => Some(3),
+            ["agentNotifications", ..] => Some(4),
+            ["attention", "summaryMode"] => Some(0),
+            ["attention", "listMode"] => Some(1),
+            ["attention", "taskBubbleMode"] => Some(2),
+            _ => None,
+        };
+        if let Some(kind) = kind { self.sample_kind = kind; self.sample_open = true; }
     }
 
     /// `Apply-ControlsToConfig` for one text box (on focus loss / Enter).
@@ -387,6 +431,8 @@ impl SettingsWindow {
                     json::set(d, &["quotaGuard", "prepareWeeklyPercent"], Value::from(v[1]));
                     json::set(d, &["quotaGuard", "handoffFiveHourPercent"], Value::from(v[2].min(v[0])));
                     json::set(d, &["quotaGuard", "handoffWeeklyPercent"], Value::from(v[3].min(v[1])));
+                } else {
+                    invalid_status = Some(loc.get("quotaGuardThresholdInvalid").to_string());
                 }
             }
             TextKey::PrepareInstruction | TextKey::HandoffInstruction => {
@@ -478,6 +524,10 @@ impl SettingsWindow {
     }
 
     fn toggle_check(&mut self, app: &mut App, key: &CheckKey) {
+        match key {
+            CheckKey::Path(path) => self.sample_for_path(path),
+            CheckKey::ContextVisible | CheckKey::ContextAlerts => { self.sample_kind = 2; self.sample_open = true; }
+        }
         let loc = self.loc(app);
         let d = &mut app.document;
         let mut status: Option<String> = None;
@@ -489,8 +539,10 @@ impl SettingsWindow {
             CheckKey::ContextVisible => {
                 let visible = !json::bool_or(d, &["fields", "context"], false);
                 json::set(d, &["fields", "context"], Value::Bool(visible));
-                json::set(d, &["behavior", "contextAlerts", "enabled"], Value::Bool(visible));
-                status = Some(loc.get(if visible { "contextDependencyEnabled" } else { "contextDependencyDisabled" }).to_string());
+                if !visible {
+                    json::set(d, &["behavior", "contextAlerts", "enabled"], Value::Bool(false));
+                    status = Some(loc.get("contextDependencyDisabled").to_string());
+                }
             }
             CheckKey::ContextAlerts => {
                 let enabled = !json::bool_or(d, &["behavior", "contextAlerts", "enabled"], false);
@@ -511,6 +563,8 @@ impl SettingsWindow {
         let Some(Control::Combo { path, items, glow_preset }) = self.controls.get(&id).cloned() else { return };
         let Some((value, _)) = items.get(index) else { return };
         json::set(&mut app.document, path, value.clone());
+        self.sample_for_path(path);
+        if path == ["layout"] { app.document["preset"] = Value::from("custom"); }
         if glow_preset {
             let color = match value.as_str() {
                 Some("violet") => Some("#FF7C3AED"),
@@ -599,13 +653,25 @@ impl SettingsWindow {
 
     fn click(&mut self, app: &mut App, id: u32) {
         let Some(control) = self.controls.get(&id).cloned() else { return };
+        if !matches!(&control, Control::Text(_)) { self.set_focus(app, None); }
         match control {
             Control::Nav(i) => {
                 self.set_focus(app, None);
                 self.tab = i;
+                self.sample_kind = match i { 3 => 1, 4 => 2, _ => 0 };
+                self.sample_open = (1..=4).contains(&i);
+                self.sample_started = 0;
             }
+            Control::SampleSelect(kind) => { self.sample_kind = kind; self.sample_started = 0; }
+            Control::SampleToggle => { self.sample_open = !self.sample_open; }
+            Control::SampleReplay => { self.sample_open = true; self.replay_sample(); }
             Control::Segment { path, value } => {
                 self.set_focus(app, None);
+                self.sample_for_path(path);
+                if path == ["multiTask", "displayMode"] {
+                    app.reset_list_override();
+                    self.sample_kind = match value.as_str() { Some("list") => 1, Some("split") => 2, _ => 0 };
+                }
                 if path == ["mainBubble", "statusStyle"] {
                     // "Off" hides the task summary; the style is kept for later.
                     let off = value.as_str() == Some("off");
@@ -767,17 +833,21 @@ impl SettingsWindow {
         }
     }
 
-    /// Account lines for the Agents page (Claude plan usage, DeepSeek balance).
+    /// Account lines for the Agents page.
     fn refresh_account(&mut self, app: &App) {
         let loc = self.loc(app);
         let a = &app.view.account;
         let updated = |at: Option<i64>| at.map(|t| format!(" · {}", loc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(t)))).unwrap_or_default();
-        self.claude_quota = if a.claude_five_hour_remaining.is_some() || a.claude_weekly_remaining.is_some() {
-            let pct = |v: Option<f64>| v.map(crate::format::percent).unwrap_or_else(|| "--".into());
-            format!("5h {} · {} {}{}", pct(a.claude_five_hour_remaining), loc.get("quotaShortWeek"), pct(a.claude_weekly_remaining), updated(a.claude_at))
-        } else {
-            loc.get("claudeQuotaNone").to_string()
+        let quota = |five: Option<f64>, week: Option<f64>, at: Option<i64>, empty: &str| {
+            if five.is_some() || week.is_some() {
+                let pct = |v: Option<f64>| v.map(crate::format::percent).unwrap_or_else(|| "--".into());
+                format!("5h {} · {} {}{}", pct(five), loc.get("quotaShortWeek"), pct(week), updated(at))
+            } else {
+                loc.get(empty).to_string()
+            }
         };
+        self.codex_quota = quota(a.codex_five_hour_remaining, a.codex_weekly_remaining, a.codex_at, "codexQuotaNone");
+        self.claude_quota = quota(a.claude_five_hour_remaining, a.claude_weekly_remaining, a.claude_at, "claudeQuotaNone");
         self.balance_status = if self.key_hint.is_none() {
             loc.get("dshBalanceNoKey").to_string()
         } else if let Some(failure) = a.dsh_failure {
@@ -809,7 +879,10 @@ impl SettingsWindow {
             preview,
             key_hint: self.key_hint.as_deref(),
             balance_status: &self.balance_status,
+            codex_quota: &self.codex_quota,
             claude_quota: &self.claude_quota,
+            sample_kind: self.sample_kind,
+            sample_open: self.sample_open,
         }
     }
 
@@ -819,6 +892,7 @@ impl SettingsWindow {
         }
         self.surface.refresh_dpi();
         self.refresh_account(app);
+        self.sample = self.sample_open.then(|| preview::Sample::build(&app.gfx, &app.catalog, &app.settings, self.sample_kind, (self.size.0 - 300.0).max(280.0), self.sample_started, time::now_ms()));
         let env = Env { gfx: &app.gfx, catalog: &app.catalog, doc: &app.document, language: &app.settings.language, scale: self.surface.scale };
         let (root, builder) = build_tree(&env, &self.look(false));
         self.controls = builder.controls;
@@ -895,6 +969,7 @@ impl SettingsWindow {
             dragging,
             scroll_hot: matches!(self.drag, Some(Drag::Thumb { .. })) || self.scroll_hot,
             preview: false,
+            sample: self.sample.as_ref(),
         };
         let custom = |p: &mut Painter, id: u32, rect: Rect| draw_custom(p, id, rect, &pc);
         let fx = |_: u64| None;
@@ -1000,6 +1075,14 @@ impl SettingsWindow {
                         if self.save_pending {
                             app.save_settings();
                             self.save_pending = false;
+                        }
+                    }
+                    TIMER_SAMPLE => {
+                        if self.sample_open && self.sample.as_ref().is_some_and(|s| s.moving(time::now_ms())) {
+                            self.paint(app);
+                        } else {
+                            unsafe { let _ = KillTimer(Some(hwnd), TIMER_SAMPLE); }
+                            self.paint(app);
                         }
                     }
                     _ => {}
@@ -1122,7 +1205,7 @@ impl SettingsWindow {
             }
             WM_MOUSEACTIVATE => Some(LRESULT(MA_ACTIVATE as isize)),
             WM_CLOSE => {
-                self.set_focus(app, None);
+                self.flush(app);
                 self.close();
                 Some(LRESULT(0))
             }
@@ -1824,7 +1907,10 @@ pub struct Look<'a> {
     pub preview: bool,
     pub key_hint: Option<&'a str>,
     pub balance_status: &'a str,
+    pub codex_quota: &'a str,
     pub claude_quota: &'a str,
+    pub sample_kind: u8,
+    pub sample_open: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1848,6 +1934,7 @@ struct PaintCtx<'a> {
     dragging: u32,
     scroll_hot: bool,
     preview: bool,
+    sample: Option<&'a preview::Sample>,
 }
 
 /// `Sync-ControlsFromConfig`: the text a box shows for the document.
@@ -1917,7 +2004,29 @@ fn pricing_status(loc: &Locale, configured: &str, home: &std::path::Path) -> Str
     loc.get(if catalog.loaded() { "pricingLoaded" } else { "pricingUnavailable" }).replace("{0}", &name)
 }
 
-/// The whole window: shadow host, shell, sidebar, page header and scrolling page.
+fn sample_panel(loc: &Locale, builder: &mut pages::Builder, kind: u8, open: bool, animate: bool) -> El {
+    use super::layout::Align;
+    let replay = builder.add(Control::SampleReplay);
+    let toggle = builder.add(Control::SampleToggle);
+    let mut replay_button = widgets::button(replay, loc.get(if kind == 3 { "previewQuietReplay" } else { "previewReplay" }));
+    if kind == 3 && !animate { replay_button.id = 0; replay_button.hand = false; replay_button.opacity = 0.45; }
+    let toolbar = El::grid(vec![Len::Star(1.0), Len::Auto], vec![])
+        .child(widgets::text(loc.get("previewTitle"), 11.5, 500, widgets::MUTED).va(Align::Center).at(0, 0))
+        .child(El::hstack()
+            .child(replay_button)
+            .child(widgets::button(toggle, loc.get(if open { "previewHide" } else { "previewShow" })).m(Th::new(6.0, 0.0, 0.0, 0.0))).at(0, 1));
+    let mut panel = El::vstack().child(toolbar);
+    if open {
+        let labels = ["previewSummary", "previewList", "previewBubble", "previewQuiet", "previewNotice"];
+        let selectors = labels.iter().enumerate().map(|(i, key)| (builder.add(Control::SampleSelect(i as u8)), loc.get(key).to_string(), kind == i as u8)).collect();
+        panel.push(widgets::segmented(selectors).m(Th::new(0.0, 6.0, 0.0, 0.0)));
+        panel.push(El::border(widgets::c("#FFF0F1F3"), widgets::c(widgets::HAIRLINE), 1.0, 10.0)
+            .m(Th::new(0.0, 5.0, 0.0, 0.0)).child(El::new(Kind::Custom { custom: CUSTOM_SAMPLE }).h(118.0)));
+    }
+    panel.m(Th::new(0.0, 10.0, 12.0, 0.0))
+}
+
+/// The whole window: sidebar, scrolling controls and a persistent native preview.
 pub fn build_tree(env: &Env, look: &Look) -> (El, pages::Builder) {
     let loc = env.catalog.settings_locale(env.language);
     let mut builder = pages::Builder::new();
@@ -1934,16 +2043,19 @@ pub fn build_tree(env: &Env, look: &Look) -> (El, pages::Builder) {
         pricing_status: look.pricing_status,
         key_hint: look.key_hint,
         balance_status: look.balance_status,
+        codex_quota: look.codex_quota,
         claude_quota: look.claude_quota,
     };
     let sidebar = pages::sidebar(&ui, &mut builder, look.status, look.status_tip);
     let header = pages::page_header(&ui, &mut builder);
     let page = pages::page(&ui, &mut builder);
     let viewport = El::new(Kind::Custom { custom: CUSTOM_VIEWPORT }).scroll_y().child(page);
-    let content = El::grid(vec![Len::Star(1.0)], vec![Len::Auto, Len::Star(1.0)])
+    let sample = sample_panel(&loc, &mut builder, look.sample_kind, look.sample_open, json::bool_or(env.doc, &["animateUpdates"], true));
+    let content = El::grid(vec![Len::Star(1.0)], vec![Len::Auto, Len::Star(1.0), Len::Auto])
         .m(Th::new(24.0, 18.0, 10.0, 8.0))
         .child(header.m(Th::new(0.0, 0.0, 12.0, 14.0)).at(0, 0))
-        .child(viewport.at(1, 0));
+        .child(viewport.at(1, 0))
+        .child(sample.at(2, 0));
     let side = El::border(widgets::c(widgets::SIDEBAR_BG), Paint::None, 0.0, 12.0).w(206.0).m(Th::all(8.0)).p(Th::new(12.0, 16.0, 12.0, 12.0)).child(sidebar);
     let shell = El::border(widgets::c(if look.preview { widgets::PAGE_BG } else { "#FCFAFAFB" }), widgets::c("#1A000000"), 1.0, 18.0)
         .m(Th::all(22.0))
@@ -1990,6 +2102,9 @@ fn draw_custom(p: &mut Painter, id: u32, rect: Rect, c: &PaintCtx) {
             if c.page.scrollbar {
                 draw_scrollbar(p, c.page.viewport, c.page.content_h, c.scroll, c.scroll_hot);
             }
+        }
+        CUSTOM_SAMPLE => {
+            if let Some(sample) = c.sample { sample.draw(p, c.gfx, rect, time::now_ms()); }
         }
         _ => {
             if let Some(key) = c.text_ids.get(&id) {
@@ -2041,10 +2156,13 @@ pub fn render_preview(gfx: &Gfx, catalog: &Catalog, scene: &str, path: &std::pat
         preview: true,
         key_hint: None,
         balance_status: loc.get("dshBalanceNoKey"),
+        codex_quota: if language == "en" { "5h 61% · 7d 78% · updated 00:57" } else { "5h 61% · 周 78% · 更新于 00:57" },
         claude_quota: "5h 22% · 周 52% · 更新于 00:57",
+        sample_kind: if tab == 3 { 1 } else if tab == 4 { 2 } else { 0 },
+        sample_open: (1..=4).contains(&tab),
     };
     let (mut root, builder) = build_tree(&env, &look);
-    let size = (880.0, 660.0);
+    let size = (960.0, 760.0);
     let ctx = layout::Ctx { gfx, scale: 1.0 };
     layout::measure(&mut root, size, &ctx);
     layout::arrange(&mut root, Rect { x: 0.0, y: 0.0, w: size.0, h: size.1 }, &ctx);
@@ -2054,6 +2172,7 @@ pub fn render_preview(gfx: &Gfx, catalog: &Catalog, scene: &str, path: &std::pat
     };
     let page = layout_page(&mut root, &env, &mut scroll).unwrap_or_default();
     let texts: HashMap<TextKey, TextEdit> = builder.text_ids.keys().map(|k| (*k, new_edit(*k, &text_value(&doc, &loc, *k)))).collect();
+    let sample = look.sample_open.then(|| preview::Sample::build(gfx, catalog, &config::Settings::from(&doc), look.sample_kind, size.0 - 300.0, 0, time::now_ms()));
     let pc = PaintCtx {
         gfx,
         scale: 1.0,
@@ -2068,6 +2187,7 @@ pub fn render_preview(gfx: &Gfx, catalog: &Catalog, scene: &str, path: &std::pat
         dragging: 0,
         scroll_hot: false,
         preview: true,
+        sample: sample.as_ref(),
     };
     let custom = |p: &mut Painter, id: u32, rect: Rect| draw_custom(p, id, rect, &pc);
     super::preview::render_tree_png(gfx, &root, (size.0 as u32, size.1 as u32), &custom, path)

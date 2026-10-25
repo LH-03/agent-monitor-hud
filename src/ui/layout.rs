@@ -170,6 +170,10 @@ pub struct El {
     pub joint: bool,
     /// Set by arrange for joints that ended up at a line edge.
     pub skip: bool,
+    /// Equal-width slots are resolved from their contents within the nearest
+    /// scope. Grouped slots own their width; no fixed column widths are needed.
+    pub width_group: u8,
+    pub width_scope: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -211,11 +215,23 @@ impl El {
             scroll_y: false,
             joint: false,
             skip: false,
+            width_group: 0,
+            width_scope: false,
         }
     }
 
     pub fn joint(mut self) -> El {
         self.joint = true;
+        self
+    }
+
+    pub fn shared_width(mut self, group: u8) -> El {
+        self.width_group = group;
+        self
+    }
+
+    pub fn shared_widths(mut self) -> El {
+        self.width_scope = true;
         self
     }
 
@@ -403,6 +419,9 @@ pub fn measure(el: &mut El, avail: (f32, f32), ctx: &Ctx) -> (f32, f32) {
         el.desired = (0.0, 0.0);
         return el.desired;
     }
+    if el.width_scope {
+        resolve_shared_widths(&mut el.children, ctx);
+    }
     let inner_avail = (
         (avail.0 - el.margin.w()).max(0.0).min(el.width.unwrap_or(el.max_w)).max(el.width.unwrap_or(0.0)),
         (avail.1 - el.margin.h()).max(0.0).min(el.height.unwrap_or(el.max_h)).max(el.height.unwrap_or(0.0)),
@@ -418,6 +437,31 @@ pub fn measure(el: &mut El, avail: (f32, f32), ctx: &Ctx) -> (f32, f32) {
     // text never gets trimmed by a sub-pixel shortfall.
     el.desired = (ctx.snap_up(w + el.margin.w()), ctx.snap_round(h + el.margin.h()));
     el.desired
+}
+
+fn resolve_shared_widths(children: &mut [El], ctx: &Ctx) {
+    fn collect(children: &mut [El], widths: &mut std::collections::HashMap<u8, f32>, ctx: &Ctx) {
+        for child in children {
+            if child.collapsed || child.width_scope { continue; }
+            if child.width_group != 0 {
+                child.width = None;
+                let width = measure(child, (INF, INF), ctx).0 - child.margin.w();
+                let entry = widths.entry(child.width_group).or_insert(0.0);
+                *entry = entry.max(width);
+            }
+            collect(&mut child.children, widths, ctx);
+        }
+    }
+    fn apply(children: &mut [El], widths: &std::collections::HashMap<u8, f32>) {
+        for child in children {
+            if child.collapsed || child.width_scope { continue; }
+            if let Some(width) = widths.get(&child.width_group) { child.width = Some(*width); }
+            apply(&mut child.children, widths);
+        }
+    }
+    let mut widths = std::collections::HashMap::new();
+    collect(children, &mut widths, ctx);
+    apply(children, &widths);
 }
 
 fn measure_content(el: &mut El, avail: (f32, f32), ctx: &Ctx) -> (f32, f32) {

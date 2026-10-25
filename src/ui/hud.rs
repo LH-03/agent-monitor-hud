@@ -1,6 +1,6 @@
 //! Element trees for the main HUD, task bubbles and the agent notice card.
-//! Every size, margin, radius and color mirrors `HudWindow.xaml`,
-//! `TaskBubbleWindow.xaml`, `MainHudView.cs` and `TaskBubbleView.cs`.
+//! Layout styles control the main header; task-list spacing is independent
+//! of content detail and scales with typography across all list styles.
 
 use super::color::color_or;
 use super::gfx::FontKey;
@@ -157,7 +157,7 @@ pub fn can_open(t: &TaskView) -> bool {
 }
 
 fn icon_button_scaled(id: u32, geometry: &str, color: &str, size: f32, margin: Th, tip: String, k: f32) -> El {
-    El::border(with_alpha("#FF0A84FF", "#FF0A84FF", 0x0A), with_alpha("#FF0A84FF", "#FF0A84FF", 0x22), 1.0, 10.0 * k)
+    El::border(with_alpha(color, "#FF8A94A6", 0x08), Paint::None, 0.0, 6.0 * k)
         .w(size)
         .h(size)
         .m(margin)
@@ -166,26 +166,35 @@ fn icon_button_scaled(id: u32, geometry: &str, color: &str, size: f32, margin: T
         .hand()
         .tip(tip)
         .hover(HoverStyle {
-            bg: with_alpha("#FF0A84FF", "", 0x18),
-            stroke: with_alpha("#FF0A84FF", "", 0x52),
-            pressed_bg: with_alpha("#FF0A84FF", "", 0x28),
+            bg: with_alpha(color, "#FF0A84FF", 0x1C),
+            stroke: Paint::None,
+            pressed_bg: with_alpha(color, "#FF0A84FF", 0x30),
             pressed_opacity: 0.82,
         })
         .child(
-            El::icon(geometry, Paint::Solid(color_or(color, "#FF0A84FF")), Paint::None, 1.35, IconFit::Uniform, 13.0 * k, 13.0 * k)
+            El::icon(geometry, Paint::Solid(color_or(color, "#FF0A84FF")), Paint::None, 1.25 * k, IconFit::Uniform,
+                if geometry == DISMISS { 11.0 * k } else { 13.0 * k }, if geometry == DISMISS { 11.0 * k } else { 13.0 * k })
                 .ha(Align::Center)
                 .va(Align::Center),
         )
 }
 
 struct Density {
+    row_padding: f32,
     row_margin: Th,
     dot_margin: Th,
     badge_padding: Th,
     badge_margin: Th,
     badge_radius: f32,
+    source_padding: Th,
+    source_margin: Th,
+    identity_margin: Th,
+    subtitle_gap: f32,
+    context_padding: Th,
+    context_margin: Th,
     action_size: f32,
     action_margin: Th,
+    dismiss_margin: Th,
     card_padding: Th,
     card_margin: Th,
     card_radius: f32,
@@ -193,58 +202,60 @@ struct Density {
     rail_margin: Th,
     rail_inner_margin: Th,
     rail_content_left: f32,
+    shell_padding: Th,
+    inline_padding: Th,
+    metric_padding: Th,
+    metric_card_padding: Th,
+    metric_card_height: f32,
+    item_gap: f32,
+    label_gap: f32,
+    separator_gap: f32,
+    header_gap: f32,
+    toggle_padding: f32,
+    section_gap: f32,
+    bubble_padding: Th,
 }
 
 fn density(name: &str) -> Density {
-    match name {
-        "relaxed" => Density {
-            row_margin: Th::new(0.0, 2.0, 0.0, 2.0),
-            dot_margin: Th::new(8.0, 0.0, 8.0, 0.0),
-            badge_padding: Th::new(7.0, 4.0, 7.0, 4.0),
-            badge_margin: Th::new(0.0, 4.0, 7.0, 4.0),
-            badge_radius: 8.0,
-            action_size: 30.0,
-            action_margin: Th::new(8.0, 3.0, 4.0, 3.0),
-            card_padding: Th::new(7.0, 4.0, 7.0, 4.0),
-            card_margin: Th::new(0.0, 4.0, 0.0, 4.0),
-            card_radius: 13.0,
-            metrics_margin: Th::new(0.0, 0.0, 8.0, 7.0),
-            rail_margin: Th::new(0.0, 3.0, 0.0, 3.0),
-            rail_inner_margin: Th::new(0.0, 3.0, 0.0, 3.0),
-            rail_content_left: 7.0,
-        },
-        "balanced" => Density {
-            row_margin: Th::new(0.0, 1.0, 0.0, 1.0),
-            dot_margin: Th::new(7.0, 0.0, 7.0, 0.0),
-            badge_padding: Th::new(6.0, 3.0, 6.0, 3.0),
-            badge_margin: Th::new(0.0, 2.0, 6.0, 2.0),
-            badge_radius: 8.0,
-            action_size: 28.0,
-            action_margin: Th::new(6.0, 1.0, 3.0, 1.0),
-            card_padding: Th::new(6.0, 3.0, 6.0, 3.0),
-            card_margin: Th::new(0.0, 2.0, 0.0, 2.0),
-            card_radius: 12.0,
-            metrics_margin: Th::new(0.0, 0.0, 7.0, 5.0),
-            rail_margin: Th::new(0.0, 2.0, 0.0, 2.0),
-            rail_inner_margin: Th::new(0.0, 2.0, 0.0, 2.0),
-            rail_content_left: 6.0,
-        },
-        _ => Density {
-            row_margin: Th::ZERO,
-            dot_margin: Th::new(6.0, 0.0, 6.0, 0.0),
-            badge_padding: Th::new(6.0, 2.0, 6.0, 2.0),
-            badge_margin: Th::new(0.0, 1.0, 6.0, 1.0),
-            badge_radius: 7.0,
-            action_size: 26.0,
-            action_margin: Th::new(5.0, 0.0, 2.0, 0.0),
-            card_padding: Th::new(5.0, 2.0, 5.0, 2.0),
-            card_margin: Th::new(0.0, 1.0, 0.0, 1.0),
-            card_radius: 11.0,
-            metrics_margin: Th::new(0.0, 0.0, 6.0, 3.0),
-            rail_margin: Th::new(0.0, 1.0, 0.0, 1.0),
-            rail_inner_margin: Th::new(0.0, 2.0, 0.0, 2.0),
-            rail_content_left: 6.0,
-        },
+    let i = match name { "compact" => 0, "relaxed" => 2, _ => 1 };
+    let pick = |values: [f32; 3]| values[i];
+    let y = pick([0.0, 1.0, 2.0]);
+    let pad = |x: [f32; 3], y: [f32; 3]| Th::new(pick(x), pick(y), pick(x), pick(y));
+    Density {
+        row_padding: pick([1.0, 3.0, 5.0]),
+        row_margin: Th::new(0.0, y, 0.0, y),
+        dot_margin: Th::new(0.0, 0.0, pick([8.0, 10.0, 12.0]), 0.0),
+        badge_padding: pad([2.0, 2.0, 2.0], [0.0, 0.0, 0.0]),
+        badge_margin: Th::new(0.0, 0.0, pick([8.0, 10.0, 12.0]), 0.0),
+        badge_radius: 6.0,
+        source_padding: pad([4.0, 4.0, 4.0], [4.0, 4.0, 4.0]),
+        source_margin: Th::new(0.0, 0.0, pick([4.0, 5.0, 6.0]), 0.0),
+        identity_margin: Th::new(0.0, 0.0, pick([12.0, 14.0, 16.0]), 0.0),
+        subtitle_gap: 1.0,
+        context_padding: pad([6.0, 6.0, 6.0], [2.0, 2.0, 2.0]),
+        context_margin: Th::new(0.0, 0.0, pick([8.0, 10.0, 12.0]), 0.0),
+        action_size: pick([24.0, 26.0, 28.0]),
+        action_margin: Th::new(pick([10.0, 12.0, 14.0]), 0.0, 0.0, 0.0),
+        dismiss_margin: Th::new(pick([4.0, 6.0, 8.0]), 0.0, 0.0, 0.0),
+        card_padding: pad([8.0, 10.0, 12.0], [4.0, 6.0, 8.0]),
+        card_margin: pad([0.0, 0.0, 0.0], [2.0, 3.0, 4.0]),
+        card_radius: 10.0,
+        metrics_margin: Th::new(0.0, 0.0, 0.0, pick([2.0, 3.0, 4.0])),
+        rail_margin: Th::new(0.0, y, 0.0, y),
+        rail_inner_margin: pad([0.0, 0.0, 0.0], [2.0, 3.0, 4.0]),
+        rail_content_left: pick([8.0, 10.0, 12.0]),
+        shell_padding: pad([14.0, 16.0, 18.0], [8.0, 10.0, 12.0]),
+        inline_padding: pad([14.0, 16.0, 18.0], [6.0, 8.0, 10.0]),
+        metric_padding: pad([8.0, 10.0, 12.0], [4.0, 5.0, 6.0]),
+        metric_card_padding: pad([9.0, 11.0, 13.0], [6.0, 8.0, 10.0]),
+        metric_card_height: pick([44.0, 48.0, 52.0]),
+        item_gap: pick([6.0, 8.0, 10.0]),
+        label_gap: pick([4.0, 5.0, 6.0]),
+        separator_gap: pick([6.0, 8.0, 10.0]),
+        header_gap: pick([8.0, 10.0, 12.0]),
+        toggle_padding: pick([7.0, 8.0, 9.0]),
+        section_gap: pick([6.0, 8.0, 10.0]),
+        bubble_padding: pad([14.0, 16.0, 18.0], [8.0, 10.0, 12.0]),
     }
 }
 
@@ -351,25 +362,18 @@ pub fn build_main(c: &Ctx, m: &MainModel, actions: &mut ActionMap) -> El {
     let status = m.overall;
     let attention = m.view.tasks.iter().any(|t| t.attention_until > c.now);
     let shell_padding = if m.quiet {
-        if s.idle_layout == "vertical" { Th::new(9.0, 10.0, 9.0, 9.0) } else { Th::new(10.0, 9.0, 10.0, 9.0) }
-    } else if s.layout == "stacked" {
-        Th::new(16.0, 13.0, 16.0, 13.0)
+        if s.idle_layout == "overall" { Th::new(12.0, 7.0, 12.0, 7.0) } else { Th::new(7.0, 5.0, 7.0, 5.0) }
     } else {
-        Th::new(14.0, 10.0, 14.0, 10.0)
+        expanded_padding(s, m.spread)
     };
-    let radius = if m.quiet { 16.0 } else { s.corner_radius as f32 };
+    let radius = if m.quiet { 10.0 } else { s.corner_radius as f32 };
     let mut shell = El::border(
         style::surface(s, status, attention, c.image_available),
         solid(&s.border, "#22FFFFFF", Role::Decoration, s, status, attention),
         s.theme.border_width as f32,
         radius,
     )
-    .p(Th::new(
-        shell_padding.l + SPREAD_SIDE * m.spread.0,
-        shell_padding.t + SPREAD_V * m.spread.1,
-        shell_padding.r + SPREAD_SIDE * m.spread.0,
-        shell_padding.b + SPREAD_V * m.spread.1,
-    ))
+    .p(shell_padding)
     .id(ID_SHELL)
     .fx(fx_key("main.shell"));
     if m.quiet {
@@ -395,14 +399,29 @@ pub fn build_main(c: &Ctx, m: &MainModel, actions: &mut ActionMap) -> El {
     root
 }
 
+pub(super) fn expanded_padding(s: &Settings, spread: (f32, f32)) -> Th {
+    let d = density(&s.list_density);
+    let p = scale_th(if s.layout == "inline" { d.inline_padding } else { d.shell_padding }, type_scale(s));
+    Th::new(p.l + SPREAD_SIDE * spread.0, p.t + SPREAD_V * spread.1, p.r + SPREAD_SIDE * spread.0, p.b + SPREAD_V * spread.1)
+}
+
+pub(super) fn task_list(c: &Ctx, tasks: &[TaskView], detached: &HashSet<String>, spread_y: f32, actions: &mut ActionMap) -> El {
+    let mut rows = El::vstack().shared_widths();
+    for (index, t) in tasks.iter().enumerate() {
+        rows.push(task_row(c, t, index as u32, detached.contains(&t.key), SPREAD_ROW * spread_y, actions));
+    }
+    rows
+}
+
 fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions: &mut ActionMap) -> El {
     let s = c.s;
+    let d = density(&s.list_density);
     let tasks = &m.view.tasks;
     let mut header = El::grid(vec![Len::Auto, Len::Star(1.0), Len::Auto], vec![]);
     let dot_size = s.theme.status_dot_size as f32;
     header.push(
         El::ellipse(solid(&s.status_color(status), "#FF8E8E93", Role::Status, s, status, attention), dot_size)
-            .m(Th::new(0.0, 0.0, 12.0 + SPREAD_GAP * 0.4 * m.spread.0, 0.0))
+            .m(Th::new(0.0, 0.0, d.header_gap * type_scale(s) + SPREAD_GAP * 0.4 * m.spread.0, 0.0))
             .va(Align::Center)
             .collapsed(!s.show_status_dot)
             .tip(format!("{} ({})", c.zh.get(status_key(status)), c.en.get(status_key(status))))
@@ -414,38 +433,38 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
         let list_expanded = m.list_visible;
         let k = type_scale(s);
         header.push(
-            // A compact pill no taller than a metric line, with a vector chevron
-            // (3.x drew font glyphs and let the button stretch the header).
-            El::border(with_alpha("#FF0A84FF", "", 0x10), with_alpha("#FF0A84FF", "", 0x26), 1.0, 9.0)
-                .p(scale_th(Th::new(8.0, 0.0, 8.0, 0.0), k))
-                .m(Th::new(8.0 + SPREAD_GAP * 0.4 * m.spread.0, 0.0, 2.0, 0.0))
-                .h((20.0 * k).round())
+            // The disclosure and row actions share one control size and radius.
+            El::border(with_alpha(&s.accent, "#FF0A84FF", 0x08), Paint::None, 0.0, 6.0 * k)
+                .p(scale_th(Th::new(d.toggle_padding, 0.0, d.toggle_padding, 0.0), k))
+                .m(Th::new(d.header_gap * k + SPREAD_GAP * 0.4 * m.spread.0, 0.0, 0.0, 0.0))
+                .min_w((d.action_size * k).round())
+                .h((d.action_size * k).round())
                 .ha(Align::End)
                 .va(Align::Center)
                 .id(ID_TOGGLE)
                 .hand()
                 .tip(c.sloc.get("activeTasks"))
                 .hover(HoverStyle {
-                    bg: with_alpha("#FF0A84FF", "", 0x1A),
-                    stroke: with_alpha("#FF0A84FF", "", 0x52),
-                    pressed_bg: with_alpha("#FF0A84FF", "", 0x28),
+                    bg: with_alpha(&s.accent, "#FF0A84FF", 0x1C),
+                    stroke: Paint::None,
+                    pressed_bg: with_alpha(&s.accent, "#FF0A84FF", 0x30),
                     pressed_opacity: 0.84,
                 })
                 .child({
-                    let blue = Paint::Solid(color_or("#FF0A84FF", "#FF0A84FF"));
+                    let blue = Paint::Solid(color_or(&s.accent, "#FF0A84FF"));
                     let chevron = El::icon(
                         if list_expanded { "M0.8,4.6 L4.5,1 L8.2,4.6" } else { "M0.8,1 L4.5,4.6 L8.2,1" },
                         blue.clone(),
                         Paint::None,
-                        1.5,
-                        IconFit::Viewbox,
+                        1.25 * k,
+                        IconFit::Uniform,
                         9.0 * k,
                         5.6 * k,
                     )
                     .va(Align::Center);
                     let mut content = El::hstack().ha(Align::Center).va(Align::Center);
                     if !list_expanded {
-                        content.push(El::text(tasks.len().to_string(), font(UI_FAMILY, scaled(12.0, k), 600), blue).va(Align::Center).m(Th::new(0.0, 0.0, 4.0, 0.0)));
+                        content.push(El::text(tasks.len().to_string(), font(&s.theme.font_family, scaled(12.0, k), 600), blue).va(Align::Center).m(Th::new(0.0, 0.0, 4.0, 0.0)));
                     }
                     content.push(chevron);
                     content
@@ -455,14 +474,10 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
     }
     let mut panel = El::vstack().child(header);
     if m.list_visible && !tasks.is_empty() {
-        panel.push(El::border(Paint::Solid(color_or("#16000000", "")), Paint::None, 0.0, 0.0).h(1.0).m(Th::new(0.0, 7.0, 0.0, 4.0)));
-        let mut rows = El::vstack();
-        for (index, t) in tasks.iter().enumerate() {
-            rows.push(task_row(c, t, index as u32, m.detached.contains(&t.key), SPREAD_ROW * m.spread.1, actions));
-        }
+        let rows = task_list(c, tasks, m.detached, m.spread.1, actions);
         // The list takes the width its rows need (no fixed minimum), so a
         // short list leaves no band of empty space.
-        panel.push(El::new(Kind::Custom { custom: SCROLL_LIST }).min_w(360.0).max_h(420.0).child(rows));
+        panel.push(El::new(Kind::Custom { custom: SCROLL_LIST }).m(Th::new(0.0, (d.section_gap * type_scale(s)).round(), 0.0, 0.0)).min_w(360.0).max_h(420.0).child(rows));
     }
     panel
 }
@@ -480,18 +495,31 @@ const QUOTA_CRIT: &str = "#FFFF453A";
 fn item_container(s: &Settings) -> El {
     let accent = &s.accent;
     let r = s.corner_radius as f32;
-    match s.layout.as_str() {
-        "chips" => El::border(with_alpha(accent, "#FF0A84FF", 24), Paint::None, 0.0, (r - 10.0).max(8.0)).p(Th::new(10.0, 6.0, 10.0, 6.0)).m(Th::new(0.0, 0.0, 6.0, 0.0)),
-        "compact" => El::border(with_alpha(accent, "#FF0A84FF", 18), Paint::None, 0.0, (r - 12.0).max(7.0)).p(Th::new(7.0, 4.0, 7.0, 4.0)).m(Th::new(0.0, 0.0, 4.0, 0.0)),
-        "outline" => El::border(with_alpha(accent, "#FF0A84FF", 8), with_alpha(accent, "#FF0A84FF", 82), 1.0, (r - 10.0).max(8.0)).p(Th::new(9.0, 5.0, 9.0, 5.0)).m(Th::new(0.0, 0.0, 6.0, 0.0)),
-        "cards" => El::border(with_alpha(accent, "#FF0A84FF", 16), with_alpha(accent, "#FF0A84FF", 42), 1.0, (r - 8.0).max(9.0)).p(Th::new(11.0, 8.0, 11.0, 8.0)).m(Th::new(0.0, 0.0, 6.0, 0.0)),
-        "stacked" => El::border(Paint::None, Paint::None, 0.0, 0.0).p(Th::new(4.0, 3.0, 4.0, 3.0)).m(Th::new(0.0, 0.0, 0.0, 2.0)),
+    let d = density(&s.list_density);
+    let mut item = match s.layout.as_str() {
+        "chips" => El::border(with_alpha(accent, "#FF0A84FF", 24), Paint::None, 0.0, (r - 10.0).max(8.0)),
+        "compact" => El::border(with_alpha(accent, "#FF0A84FF", 18), Paint::None, 0.0, (r - 12.0).max(7.0)),
+        "outline" => El::border(with_alpha(accent, "#FF0A84FF", 8), with_alpha(accent, "#FF0A84FF", 82), 1.0, (r - 10.0).max(8.0)),
+        "cards" => El::border(with_alpha(accent, "#FF0A84FF", 16), with_alpha(accent, "#FF0A84FF", 42), 1.0, (r - 8.0).max(9.0)).min_h(d.metric_card_height * type_scale(s)),
+        "stacked" => El::border(with_alpha(accent, "#FF0A84FF", 16), Paint::None, 0.0, (r - 10.0).max(8.0)),
         _ => El::border(Paint::None, Paint::None, 0.0, 0.0),
-    }
+    };
+    item.padding = scale_th(match s.layout.as_str() {
+        "cards" => d.metric_card_padding,
+        "compact" => Th::new(d.metric_padding.l - 2.0, d.metric_padding.t - 1.0, d.metric_padding.r - 2.0, d.metric_padding.b - 1.0),
+        "chips" | "outline" | "stacked" => d.metric_padding,
+        _ => Th::ZERO,
+    }, type_scale(s));
+    item.margin = scale_th(match s.layout.as_str() {
+        "stacked" => Th::new(0.0, 0.0, 0.0, d.item_gap),
+        "inline" => Th::ZERO,
+        _ => Th::new(0.0, 0.0, d.item_gap, 0.0),
+    }, type_scale(s));
+    item
 }
 
 fn label_text(s: &Settings, text: impl Into<String>) -> El {
-    El::text(text, font(UI_FAMILY, (s.font_size - 2.0).max(10.0), 400), solid(&s.muted, "#FF8A94A6", Role::Secondary, s, "idle", false)).va(Align::Center)
+    El::text(text, font(&s.theme.font_family, (s.font_size - 2.0).max(10.0), 400), solid(&s.muted, "#FF8A94A6", Role::Secondary, s, "idle", false)).va(Align::Center)
 }
 
 fn value_text(s: &Settings, text: impl Into<String>, color: Option<&str>) -> El {
@@ -499,15 +527,15 @@ fn value_text(s: &Settings, text: impl Into<String>, color: Option<&str>) -> El 
         Some(c) => solid(c, c, Role::Status, s, "active", false),
         None => solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "idle", false),
     };
-    El::text(text, font(UI_FAMILY, s.font_size, 600), paint).va(Align::Center)
+    El::text(text, font(&s.theme.font_family, s.font_size, 600), paint).va(Align::Center)
 }
 
 /// A classic labelled metric (label then value; stacked for the cards layout).
 fn metric_item(s: &Settings, label: &str, value: &str, color: Option<&str>) -> El {
     let cards = s.layout == "cards";
-    let label = label_text(s, label).m(if cards { Th::new(0.0, 0.0, 0.0, 2.0) } else { Th::new(0.0, 0.0, 6.0, 0.0) });
+    let label = label_text(s, label).m(scale_th(if cards { Th::new(0.0, 0.0, 0.0, 2.0) } else { Th::new(0.0, 0.0, density(&s.list_density).label_gap, 0.0) }, type_scale(s)));
     let content = if cards { El::vstack() } else { El::hstack() }.child(label).child(value_text(s, value, color));
-    item_container(s).va(Align::Center).child(content)
+    item_container(s).va(Align::Center).child(content.va(Align::Center))
 }
 
 /// Remaining-percent level colour: none when comfortable.
@@ -594,11 +622,15 @@ fn quota_items(c: &Ctx, d: &crate::model::Snapshot) -> Vec<El> {
             continue;
         }
         let mut group = El::hstack().va(Align::Center);
-        group.push(
-            El::icon(source.icon, solid(source.color, source.color, Role::Primary, s, "idle", false), Paint::None, 1.4, IconFit::Viewbox, (12.0 * k).round(), (12.0 * k).round())
+        let icon = El::icon(source.icon, solid(source.color, source.color, Role::Primary, s, "idle", false), Paint::None, 1.4, IconFit::Viewbox, (12.0 * k).round(), (12.0 * k).round())
                 .va(Align::Center)
-                .m(Th::new(0.0, 0.0, (6.0 * k).round(), 0.0)),
-        );
+                .m(Th::new(0.0, 0.0, (6.0 * k).round(), 0.0));
+        let card_header = if s.layout == "cards" {
+            Some(El::hstack().child(icon).child(label_text(s, source.name)).m(Th::new(0.0, 0.0, 0.0, 3.0 * k)))
+        } else {
+            group.push(icon);
+            None
+        };
         let mut tip = vec![source.name.to_string()];
         for (i, (short, full, value, _)) in windows.iter().enumerate() {
             let text = value.map(format::percent).unwrap_or_else(|| "--".into());
@@ -627,7 +659,11 @@ fn quota_items(c: &Ctx, d: &crate::model::Snapshot) -> Vec<El> {
         if !source.note.is_empty() {
             tip.push(source.note.clone());
         }
-        items.push(item_container(s).va(Align::Center).tip(tip.join(" · ")).child(group));
+        let content = match card_header {
+            Some(header) => El::vstack().child(header).child(group).va(Align::Center),
+            None => group,
+        };
+        items.push(item_container(s).va(Align::Center).tip(tip.join(" · ")).child(content));
     }
     items
 }
@@ -640,13 +676,13 @@ fn rhythm_item(c: &Ctx, m: &MainModel) -> El {
     let n = s.main.rhythm_minutes.min(ledger.minutes.len()).max(2);
     let values: Vec<f32> = ledger.minutes[ledger.minutes.len() - n..].iter().map(|v| *v as f32).collect();
     let mut row = El::hstack().va(Align::Center);
-    row.push(
-        El::spark(values, solid(&s.accent, "#FF0A84FF", Role::Primary, s, "active", false), with_alpha(&s.accent, "#FF0A84FF", 0x30), (64.0 * k).round(), (16.0 * k).round())
+    let spark = El::spark(values, solid(&s.accent, "#FF0A84FF", Role::Primary, s, "active", false), with_alpha(&s.accent, "#FF0A84FF", 0x30), (64.0 * k).round(), (16.0 * k).round())
             .va(Align::Center)
-            .m(Th::new(0.0, 0.0, (8.0 * k).round(), 0.0)),
-    );
-    row.push(label_text(s, c.loc.get("todayLabel")).m(Th::new(0.0, 0.0, (5.0 * k).round(), 0.0)));
-    row.push(value_text(s, format::number(ledger.today_tokens, "compact"), None));
+            .m(Th::new(0.0, 0.0, (8.0 * k).round(), 0.0));
+    if s.layout != "cards" {
+        row.push(label_text(s, c.loc.get("todayLabel")).m(Th::new(0.0, 0.0, (5.0 * k).round(), 0.0)));
+    }
+    row.push(value_text(s, format::number(ledger.today_tokens, &s.number_format), None));
     if s.main.rhythm_cost {
         if let Some(cost) = ledger.today_cost.filter(|c| *c > 0.0) {
             row.push(label_text(s, "\u{00B7}").m(Th::new((5.0 * k).round(), 0.0, (5.0 * k).round(), 0.0)));
@@ -654,7 +690,15 @@ fn rhythm_item(c: &Ctx, m: &MainModel) -> El {
         }
     }
     let tip = c.sloc.get("rhythmTooltip").replace("{0}", &n.to_string());
-    item_container(s).va(Align::Center).tip(tip).child(row)
+    let content = if s.layout == "cards" {
+        El::vstack().va(Align::Center)
+            .child(El::hstack().child(label_text(s, c.loc.get("todayLabel"))).child(spark.m(Th::new(7.0 * k, 0.0, 0.0, 0.0))).m(Th::new(0.0, 0.0, 0.0, 2.0 * k)))
+            .child(row)
+    } else {
+        row.children.insert(0, spark);
+        row
+    };
+    item_container(s).va(Align::Center).tip(tip).child(content)
 }
 
 /// Compact task summary: "3 tasks · 2 running · 1 waiting".
@@ -681,7 +725,12 @@ fn status_item(c: &Ctx, tasks: &[TaskView]) -> El {
         }
     }
     let tip = groups.iter().map(|(l, n)| format!("{l} {n}")).collect::<Vec<_>>().join(" · ");
-    item_container(s).va(Align::Center).tip(tip).child(row)
+    let content = if s.layout == "cards" {
+        El::vstack().va(Align::Center).child(label_text(s, c.loc.get("activeTasks")).m(Th::new(0.0, 0.0, 0.0, 3.0 * type_scale(s)))).child(row)
+    } else {
+        row
+    };
+    item_container(s).va(Align::Center).tip(tip).child(content)
 }
 
 /// Amber "needs you" pill in front of everything while a task waits.
@@ -700,8 +749,8 @@ fn waiting_badge(c: &Ctx, tasks: &[TaskView]) -> Option<El> {
     let k = type_scale(s);
     Some(
         El::border(with_alpha(QUOTA_WARN, QUOTA_WARN, 0x2E), with_alpha(QUOTA_WARN, QUOTA_WARN, 0x66), 1.0, (s.corner_radius as f32 - 10.0).max(8.0))
-            .p(scale_th(Th::new(9.0, 4.0, 9.0, 4.0), k))
-            .m(Th::new(0.0, 0.0, 6.0, 0.0))
+            .p(scale_th(density(&s.list_density).metric_padding, k))
+            .m(scale_th(Th::new(0.0, 0.0, density(&s.list_density).item_gap, 0.0), k))
             .va(Align::Center)
             .tip(tip)
             .fx(fx_key("main.waiting"))
@@ -725,7 +774,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
                 c.loc.get("waiting")
             };
             wrap.push(
-                El::text(text, font(UI_FAMILY, s.font_size, 600), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "idle", false))
+                El::text(text, font(&s.theme.font_family, s.font_size, 600), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "idle", false))
                     .va(Align::Center),
             );
             return wrap;
@@ -761,7 +810,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
     let gap = SPREAD_GAP * m.spread.0;
     for (i, mut item) in items.into_iter().enumerate() {
         if s.layout != "inline" && i > 0 {
-            item.margin.l += gap;
+            if s.layout == "stacked" { item.margin.t += SPREAD_ROW * m.spread.1; } else { item.margin.l += gap; }
         }
         if s.layout == "inline" && i > 0 {
             wrap.push(
@@ -770,7 +819,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
                     font(&s.theme.font_family, s.font_size, 400),
                     solid(&s.muted, "#FF8A94A6", Role::Secondary, s, "idle", false),
                 )
-                .m(Th::new(7.0 + gap / 2.0, 0.0, 7.0 + gap / 2.0, 0.0))
+                .m(Th::new(density(&s.list_density).separator_gap * type_scale(s) + gap / 2.0, 0.0, density(&s.list_density).separator_gap * type_scale(s) + gap / 2.0, 0.0))
                 .va(Align::Center)
                 .joint(),
             );
@@ -823,7 +872,7 @@ fn scale_th(t: Th, k: f32) -> Th {
     Th::new(r(t.l), r(t.t), r(t.r), r(t.b))
 }
 
-fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, actions: &mut ActionMap) -> El {
+pub(super) fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, actions: &mut ActionMap) -> El {
     let s = c.s;
     let k = type_scale(s);
     let status = t.status;
@@ -835,8 +884,9 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
     actions.insert(id(ROW_ACTION), (t.key.clone(), ROW_ACTION));
     actions.insert(id(ROW_DISMISS), (t.key.clone(), ROW_DISMISS));
     let family = s.theme.font_family.as_str();
-    let margin = Th::new(d.row_margin.l, d.row_margin.t + row_gap, d.row_margin.r, d.row_margin.b + row_gap);
-    let mut row = El::border(solid("#08000000", "#08000000", Role::Decoration, s, status, attention), Paint::None, 0.0, (8.0 * k).round()).m(margin);
+    let body_padding = scale_th(Th::new(0.0, d.row_padding, 0.0, d.row_padding), k);
+    let mut row = El::border(Paint::None, Paint::None, 0.0, (8.0 * k).round())
+        .m(scale_th(d.row_margin, k)).p(body_padding);
     let mut grid = El::grid(
         vec![Len::Auto, Len::Auto, Len::Auto, Len::Auto, Len::Star(1.0), Len::Auto, Len::Auto],
         if detailed || s.list_style == "cards" { vec![Len::Auto, Len::Auto] } else { vec![] },
@@ -847,18 +897,21 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
         .fx(fx_key(&format!("row.dot:{}", t.key)))
         .collapsed(s.list_style == "rail");
     let source = El::border(
-        with_alpha(&source_color(t, s), "#FF64748B", 24),
-        with_alpha(&source_color(t, s), "#FF64748B", 72),
-        1.0,
-        d.badge_radius,
+        with_alpha(&source_color(t, s), "#FF64748B", 20),
+        Paint::None,
+        0.0,
+        (d.badge_radius * k).round(),
     )
-    .p(scale_th(Th::new(4.0, 3.0, 4.0, 3.0), k))
-    .m(scale_th(Th::new(0.0, 1.0, 6.0, 1.0), k))
+    .p(scale_th(d.source_padding, k))
+    .m(scale_th(d.source_margin, k))
+    .va(Align::Center)
     .tip(source_label(t, c.loc))
     .child(source_icon(t, s, status, false, (14.0 * k).round()).ha(Align::Center).va(Align::Center));
-    let badge = El::border(with_alpha("#FF0A84FF", "", 0x12), Paint::None, 0.0, d.badge_radius)
+    let badge = El::border(Paint::None, Paint::None, 0.0, (d.badge_radius * k).round())
         .p(scale_th(d.badge_padding, k))
         .m(scale_th(d.badge_margin, k))
+        .shared_width(1)
+        .va(Align::Center)
         .tip(display_name(t, s, c.loc, true))
         .child(El::text(format!("#{}", t.number), font(family, scaled(12.0, k), 600), solid(&s.accent, "#FF0A84FF", Role::Primary, s, status, false)));
     let collapsed_subtitle = time::local_hm(t.started_at);
@@ -869,15 +922,13 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
     };
     let identity = El::vstack()
         .va(Align::Center)
-        .m(Th::new(0.0, 2.0, 12.0, 2.0))
+        .m(scale_th(d.identity_margin, k))
         .max_w(280.0 * k)
+        .shared_width(2)
         .tip(display_name(t, s, c.loc, false))
         .child(El::text(project_name(t, c.loc), font_trim(family, scaled(12.0, k), 600), solid(&s.foreground, "#FF111827", Role::Primary, s, status, attention)).ha(Align::Stretch))
-        .child(
-            El::text(subtitle, font_trim(family, scaled(11.0, k).max(9.0), 400), solid(&s.muted, "#FF667085", Role::Secondary, s, status, attention))
-                .m(Th::new(0.0, 1.0, 0.0, 0.0))
-                .ha(Align::Stretch),
-        );
+        .child(El::text(subtitle, font_trim(family, scaled(11.0, k).max(9.0), 400), solid(&s.muted, "#FF667085", Role::Secondary, s, status, attention))
+            .m(scale_th(Th::new(0.0, d.subtitle_gap, 0.0, 0.0), k)).ha(Align::Stretch));
     let notice = t.notice.is_some() && !detached;
     let metrics_text = task_metrics_text(t, c, true);
     let wrap_metrics = detailed || s.list_style == "cards";
@@ -900,17 +951,19 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
     .tip(metrics_text)
     .at(0, 1);
     let context = El::border(
-        solid("#0D0A84FF", "#0D0A84FF", Role::Decoration, s, status, false),
-        solid("#330A84FF", "#330A84FF", Role::Decoration, s, status, false),
-        1.0,
-        (7.0 * k).round(),
+        with_alpha(&s.foreground, "#FF111827", 0x08),
+        Paint::None,
+        0.0,
+        (d.badge_radius * k).round(),
     )
-    .p(scale_th(Th::new(6.0, 2.0, 6.0, 2.0), k))
-    .m(scale_th(Th::new(0.0, 0.0, 7.0, 0.0), k))
+    .p(scale_th(d.context_padding, k))
+    .m(scale_th(d.context_margin, k))
+    .shared_width(3)
+    .min_h((22.0 * k).round())
     .va(Align::Center)
     .tip(context_tooltip(t, c.loc))
     .fx(fx_key(&format!("row.context:{}", t.key)))
-    .child(El::text(context_text(t, c.loc), font(family, scaled(12.0, k), 600), solid(&s.foreground, "#FF111827", Role::Primary, s, status, attention)))
+    .child(El::text(context_text(t, c.loc), font(family, scaled(12.0, k), 600), solid(&s.foreground, "#FF111827", Role::Primary, s, status, attention)).va(Align::Center))
     .at(0, 0);
     let mut metrics_host = El::grid(vec![Len::Auto, Len::Star(1.0)], vec![]).va(Align::Center).child(context).child(metrics);
     let action = icon_button_scaled(
@@ -922,16 +975,16 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
         c.sloc.get(if detached { "mergeTask" } else { "detachTask" }).into(),
         k,
     );
-    let dismiss = icon_button_scaled(id(ROW_DISMISS), DISMISS, &s.muted, (d.action_size * k).round(), scale_th(Th::new(1.0, 0.0, 2.0, 0.0), k), c.sloc.get("dismissTask").into(), k);
+    let dismiss = icon_button_scaled(id(ROW_DISMISS), DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("dismissTask").into(), k);
     let two_rows = detailed || s.list_style == "cards";
     let span = if two_rows { 2 } else { 1 };
     grid.push(dot.at(0, 0).span(span, 1));
     if detailed {
-        metrics_host = metrics_host.at(1, 3).span(1, 2).m(d.metrics_margin);
+        metrics_host = metrics_host.at(1, 3).span(1, 2).m(scale_th(d.metrics_margin, k));
         grid.push(source.at(0, 1).span(2, 1));
         grid.push(badge.at(0, 2).span(2, 1));
     } else if s.list_style == "cards" {
-        metrics_host = metrics_host.at(1, 1).span(1, 4).m(d.metrics_margin);
+        metrics_host = metrics_host.at(1, 1).span(1, 4).m(scale_th(d.metrics_margin, k));
         grid.push(source.at(0, 1));
         grid.push(badge.at(0, 2));
     } else {
@@ -946,24 +999,24 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
 
     let item = match s.list_style.as_str() {
         "cards" => {
-            row = El::border(Paint::None, Paint::None, 0.0, 0.0).m(d.row_margin).child(grid);
+            row = El::border(Paint::None, Paint::None, 0.0, 0.0).p(body_padding).child(grid);
             El::border(
                 solid("#0D0A84FF", "#0D0A84FF", Role::Decoration, s, status, false),
                 solid("#220A84FF", "#220A84FF", Role::Decoration, s, status, false),
                 1.0,
-                d.card_radius,
+                (d.card_radius * k).round(),
             )
-            .p(d.card_padding)
-            .m(d.card_margin)
+            .p(scale_th(d.card_padding, k))
+            .m(scale_th(d.card_margin, k))
             .child(row)
         }
         "rail" => {
-            row = El::border(Paint::None, Paint::None, 0.0, 0.0).m(Th::new(d.rail_content_left, 0.0, 0.0, 0.0)).child(grid).at(0, 1);
-            El::grid(vec![Len::Px(4.0), Len::Star(1.0)], vec![])
-                .m(d.rail_margin)
+            row = El::border(Paint::None, Paint::None, 0.0, 0.0).p(body_padding).m(scale_th(Th::new(d.rail_content_left, 0.0, 0.0, 0.0), k)).child(grid).at(0, 1);
+            El::grid(vec![Len::Px((4.0 * k).round()), Len::Star(1.0)], vec![])
+                .m(scale_th(d.rail_margin, k))
                 .child(
                     El::border(solid(&s.status_color(status), "#FF8E8E93", Role::Status, s, status, attention), Paint::None, 0.0, 2.0)
-                        .m(d.rail_inner_margin)
+                        .m(scale_th(d.rail_inner_margin, k))
                         .at(0, 0),
                 )
                 .child(row)
@@ -975,6 +1028,7 @@ fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_gap: f32, act
         }
     };
     El::border(Paint::None, Paint::None, 0.0, d.card_radius.max(9.0))
+        .m(Th::new(0.0, row_gap, 0.0, row_gap))
         .id(id(ROW_SURFACE))
         .fx(fx_key(&format!("row.surface:{}", t.key)))
         .tip(if s.open_task_on_double_click && can_open(t) { c.sloc.get("openTaskTooltip") } else { "" })
@@ -995,67 +1049,37 @@ impl WrapBackground for El {
     }
 }
 
-fn quiet_panel(c: &Ctx, m: &MainModel) -> El {
-    let s = c.s;
-    let status = m.overall;
-    let vertical = s.idle_layout == "vertical";
-    let task_layout = matches!(s.idle_layout.as_str(), "horizontal" | "vertical");
-    let mut panel = if vertical { El::vstack() } else { El::hstack() }.ha(Align::Center).va(Align::Center);
-    if !task_layout {
-        panel.push(
-            El::panel()
-                .w(18.0)
-                .h(18.0)
-                .ha(Align::Center)
-                .va(Align::Center)
-                .child(
-                    El::new(Kind::Ellipse { fill: Paint::None, stroke: solid(&s.accent, "#FF0A84FF", Role::Decoration, s, status, false), thickness: 1.5 })
-                        .w(17.0)
-                        .h(17.0)
-                        .ha(Align::Center)
-                        .va(Align::Center)
-                        .opacity(0.48),
-                )
-                .child(
-                    El::ellipse(solid(&s.status_color(status), "#FF8E8E93", Role::Status, s, status, false), 12.0)
-                        .ha(Align::Center)
-                        .va(Align::Center),
-                ),
-        );
-        return panel;
-    }
-    // The separator has no background in the XAML: it only spaces the lights.
-    panel.push(if vertical {
-        El::panel().w(30.0).h(1.0).m(Th::new(0.0, 8.0, 0.0, 6.0)).ha(Align::Center).collapsed(true)
+fn quiet_task_light(c: &Ctx, t: &TaskView) -> El {
+    let color = solid(&c.s.status_color(t.status), "#FF8E8E93", Role::Status, c.s, t.status, false);
+    let mark = if c.s.idle_layout != "overall" && c.s.idle_task_style == "bar" {
+        El::border(color, Paint::None, 0.0, 1.5).w(12.0).h(3.0)
     } else {
-        El::panel().w(1.0).h(20.0).m(Th::new(11.0, 0.0, 8.0, 0.0)).va(Align::Center).collapsed(true)
-    });
-    let mut lights = if vertical { El::vstack() } else { El::hstack() }.va(Align::Center);
-    let bar = s.idle_task_style == "bar";
-    for t in m.view.tasks.iter().take(12) {
-        lights.push(
-            El::border(solid(&s.status_color(t.status), "#FF8E8E93", Role::Status, s, t.status, false), Paint::None, 0.0, if bar { 7.0 } else { 10.0 })
-                .min_w(if bar { 26.0 } else { 18.0 })
-                .h(18.0)
-                .m(if vertical { Th::new(0.0, 2.0, 0.0, 2.0) } else { Th::new(2.0, 0.0, 2.0, 0.0) })
-                .tip(display_name(t, s, c.sloc, false))
-                .child(
-                    El::text(t.number.to_string(), font(&s.theme.font_family, 9.0, 700), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, t.status, false))
-                        .ha(Align::Center)
-                        .va(Align::Center),
-                ),
-        );
+        El::ellipse(color, 5.0)
+    };
+    El::hstack().va(Align::Center)
+        .child(mark.va(Align::Center).m(Th::new(0.0, 0.0, 5.0, 0.0)))
+        .child(El::text(format!("#{}", t.number), font(&c.s.theme.font_family, 10.0, 500), solid(&c.s.foreground, "#FFFFFFFF", Role::Primary, c.s, t.status, false)).va(Align::Center))
+        .tip(display_name(t, c.s, c.sloc, false))
+}
+
+fn quiet_panel(c: &Ctx, m: &MainModel) -> El {
+    if c.s.idle_layout == "overall" {
+        return El::ellipse(solid(&c.s.status_color(m.overall), "#FF8E8E93", Role::Status, c.s, m.overall, false), 6.0)
+            .ha(Align::Center).va(Align::Center).fx(fx_key("main.dot"));
+    }
+    let vertical = c.s.idle_layout == "vertical";
+    let mut lights = if vertical { El::vstack() } else { El::hstack() };
+    for (index, task) in m.view.tasks.iter().take(12).enumerate() {
+        lights.push(quiet_task_light(c, task).m(if index == 0 { Th::ZERO } else if vertical {
+            Th::new(0.0, 6.0, 0.0, 0.0)
+        } else { Th::new(10.0, 0.0, 0.0, 0.0) }));
     }
     if m.view.tasks.len() > 12 {
-        lights.push(
-            El::text(format!("+{}", m.view.tasks.len() - 12), font(&s.theme.font_family, 12.0, 600), solid(&s.muted, "#FF667085", Role::Secondary, s, status, false))
-                .m(if vertical { Th::new(6.0, 3.0, 0.0, 2.0) } else { Th::new(5.0, 0.0, 1.0, 0.0) })
-                .va(Align::Center)
-                .tip(c.sloc.get("activeTasks")),
-        );
+        lights.push(label_text(c.s, format!("+{}", m.view.tasks.len() - 12)).m(if vertical {
+            Th::new(0.0, 6.0, 0.0, 0.0)
+        } else { Th::new(10.0, 0.0, 0.0, 0.0) }));
     }
-    panel.push(lights);
-    panel
+    lights.ha(Align::Center).va(Align::Center)
 }
 
 // ----------------------------------------------------------------------- bubble
@@ -1063,12 +1087,13 @@ fn quiet_panel(c: &Ctx, m: &MainModel) -> El {
 pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32, f32)>) -> El {
     let s = c.s;
     let k = type_scale(s);
+    let d = density(&s.list_density);
     let status = t.status;
     let attention = t.attention_until > c.now;
     let notice = t.notice.is_some();
     let family = s.theme.font_family.as_str();
     let dot = El::ellipse(solid(&s.status_color(status), "#FF8E8E93", Role::Status, s, status, attention), s.theme.status_dot_size as f32)
-        .m(if collapsed { Th::ZERO } else { Th::new(0.0, 0.0, 9.0, 0.0) })
+        .m(if collapsed { Th::ZERO } else { scale_th(d.dot_margin, k) })
         .va(Align::Center)
         .fx(fx_key(&format!("bubble.dot:{}", t.key)))
         .at(0, 0);
@@ -1076,17 +1101,17 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
     if !collapsed {
         let header = El::hstack()
             .child(
-                El::border(with_alpha(&source_color(t, s), "#FF64748B", 24), with_alpha(&source_color(t, s), "#FF64748B", 72), 1.0, 7.0)
-                    .p(scale_th(Th::new(4.0, 3.0, 4.0, 3.0), k))
-                    .m(scale_th(Th::new(0.0, 0.0, 7.0, 0.0), k))
+                El::border(with_alpha(&source_color(t, s), "#FF64748B", 20), Paint::None, 0.0, d.badge_radius * k)
+                    .p(scale_th(d.source_padding, k))
+                    .m(scale_th(d.source_margin, k))
                     .va(Align::Center)
                     .tip(source_label(t, c.loc))
                     .child(source_icon(t, s, status, attention, (14.0 * k).round())),
             )
             .child(
-                El::border(with_alpha("#FF0A84FF", "", 0x12), Paint::None, 0.0, 8.0)
-                    .p(scale_th(Th::new(7.0, 3.0, 7.0, 3.0), k))
-                    .m(scale_th(Th::new(0.0, 0.0, 7.0, 0.0), k))
+                El::border(Paint::None, Paint::None, 0.0, d.badge_radius * k)
+                    .p(scale_th(d.badge_padding, k))
+                    .m(scale_th(d.badge_margin, k))
                     .va(Align::Center)
                     .child(El::text(format!("#{}", t.number), font(family, scaled(12.0, k), 600), solid(&s.accent, "#FF0A84FF", Role::Primary, s, status, attention))),
             )
@@ -1098,20 +1123,22 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
         let context_visible = s.field("context");
         let metrics_text = task_metrics_text(t, c, false);
         let details = El::hstack()
-            .m(scale_th(Th::new(0.0, 5.0, 0.0, 0.0), k))
+            .m(scale_th(Th::new(0.0, d.section_gap, 0.0, 0.0), k))
             .child(
                 El::border(
-                    solid("#0D0A84FF", "#0D0A84FF", Role::Decoration, s, status, attention),
-                    solid("#330A84FF", "#330A84FF", Role::Decoration, s, status, attention),
-                    1.0,
-                    7.0,
+                    with_alpha(&s.foreground, "#FF111827", 0x08),
+                    Paint::None,
+                    0.0,
+                    d.badge_radius * k,
                 )
-                .p(scale_th(Th::new(6.0, 2.0, 6.0, 2.0), k))
-                .m(scale_th(Th::new(0.0, 0.0, 7.0, 0.0), k))
+                .p(scale_th(d.context_padding, k))
+                .m(scale_th(d.context_margin, k))
+                .min_h((22.0 * k).round())
+                .va(Align::Center)
                 .collapsed(!context_visible)
                 .tip(context_tooltip(t, c.loc))
                 .fx(fx_key(&format!("bubble.context:{}", t.key)))
-                .child(El::text(context_text(t, c.loc), font(family, scaled(12.0, k), 600), solid(&s.foreground, "#FF111827", Role::Primary, s, status, attention))),
+                .child(El::text(context_text(t, c.loc), font(family, scaled(12.0, k), 600), solid(&s.foreground, "#FF111827", Role::Primary, s, status, attention)).va(Align::Center)),
             )
             .child(
                 El::text(
@@ -1127,41 +1154,20 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
                 .va(Align::Center),
             );
         dock.push(El::vstack().child(header).child(details).va(Align::Center).at(0, 1));
-        let button = |id: u32, geometry: &str, viewbox: f32, thickness: f32, margin: Th, tip: &str| {
-            El::border(with_alpha("#FF0A84FF", "", 0x0A), with_alpha("#FF0A84FF", "", 0x22), 1.0, 10.0)
-                .w((30.0 * k).round())
-                .h((30.0 * k).round())
-                .m(margin)
-                .va(Align::Center)
-                .id(id)
-                .hand()
-                .tip(tip)
-                .hover(HoverStyle {
-                    bg: with_alpha("#FF0A84FF", "", 0x18),
-                    stroke: with_alpha("#FF0A84FF", "", 0x52),
-                    pressed_bg: with_alpha("#FF0A84FF", "", 0x28),
-                    pressed_opacity: 0.82,
-                })
-                .child(
-                    El::icon(geometry, Paint::Solid(color_or("#FF0A84FF", "")), Paint::None, thickness, IconFit::Viewbox, viewbox, viewbox)
-                        .ha(Align::Center)
-                        .va(Align::Center),
-                )
-        };
-        dock.push(button(ID_BUBBLE_MERGE, MERGE, 13.0 * k, 1.35, Th::new(9.0, 0.0, 0.0, 0.0), c.sloc.get("mergeTask")).at(0, 2));
-        dock.push(button(ID_BUBBLE_DISMISS, DISMISS, 12.0 * k, 1.45, Th::new(5.0, 0.0, 0.0, 0.0), c.sloc.get("closeTaskBubble")).at(0, 3));
+        dock.push(icon_button_scaled(ID_BUBBLE_MERGE, MERGE, &s.accent, (d.action_size * k).round(), scale_th(d.action_margin, k), c.sloc.get("mergeTask").into(), k).at(0, 2));
+        dock.push(icon_button_scaled(ID_BUBBLE_DISMISS, DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("closeTaskBubble").into(), k).at(0, 3));
     }
     let shell = El::border(
         style::surface(s, status, attention, c.image_available),
         solid(&s.border, "#22FFFFFF", Role::Decoration, s, status, attention),
         s.theme.border_width as f32,
-        (s.corner_radius as f32 - 4.0).max(12.0),
+        if collapsed { 10.0 } else { (s.corner_radius as f32 - 4.0).max(12.0) },
     )
-    .p(scale_th(if collapsed { Th::all(10.0) } else { Th::new(12.0, 9.0, 12.0, 9.0) }, k))
+    .p(if collapsed { Th::new(10.0, 6.0, 10.0, 6.0) } else { scale_th(d.bubble_padding, k) })
     .id(ID_BUBBLE_SHELL)
     .tip(if s.open_task_on_double_click && can_open(t) { c.sloc.get("openTaskTooltip") } else { "" })
     .fx(fx_key(&format!("bubble.shell:{}", t.key)))
-    .child(dock);
+    .child(if collapsed { quiet_task_light(c, t) } else { dock });
     let mut root = El::panel().m(Th::all(BUBBLE_INSET)).child(shell);
     if !collapsed {
         root.push(
@@ -1204,7 +1210,7 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
                 .p(Th::new(8.0, 3.0, 8.0, 3.0))
                 .m(Th::new(0.0, 0.0, 7.0, 0.0))
                 .va(Align::Center)
-                .child(El::text(format!("\u{2726} {badge}"), font(UI_FAMILY, 12.0, 700), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "active", true)))
+                .child(El::text(format!("\u{2726} {badge}"), font(&s.theme.font_family, 12.0, 700), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "active", true)))
                 .at(0, 0),
         )
         .child(

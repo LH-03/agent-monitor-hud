@@ -81,6 +81,9 @@ pub enum Control {
     PickerCancel,
     PickerApply,
     PickerClose,
+    SampleSelect(u8),
+    SampleToggle,
+    SampleReplay,
 }
 
 pub const STATUS_KEYS: [&str; 8] = ["active", "listening", "idle", "paused", "error", "completed", "aborted", "waiting"];
@@ -117,6 +120,7 @@ pub struct Ui<'a> {
     pub key_hint: Option<&'a str>,
     /// DeepSeek balance line ("¥23.50 · 00:57") or the last error.
     pub balance_status: &'a str,
+    pub codex_quota: &'a str,
     /// Claude plan usage line from the desktop app's samples.
     pub claude_quota: &'a str,
 }
@@ -182,7 +186,7 @@ fn combo_ex(ui: &Ui, b: &mut Builder, path: &'static [&'static str], items: Vec<
     let index = match selected {
         Some(i) => i,
         None => {
-            labels.push(String::new());
+            labels.push(current.as_str().map(str::to_string).unwrap_or_else(|| current.to_string()));
             labels.len() - 1
         }
     };
@@ -353,7 +357,7 @@ fn general(ui: &Ui, b: &mut Builder) -> El {
         ui.opt("grpTaskRules"),
         vec![
             row(ui.t("monitorScope"), ui.opt("monitorScopeHint"), Some(combo(ui, b, &["monitorScope"], s_items(ui, &[("latest", "monitorLatest"), ("aggregate", "monitorAggregate")])))),
-            row(ui.t("activeWindow"), None, Some(combo(ui, b, &["activeWindowMinutes"], n_items(ui, &[(5, "minutes5"), (15, "minutes15"), (30, "minutes30"), (60, "minutes60")])))),
+            row(ui.t("activeWindow"), ui.opt("activeWindowHint"), Some(combo(ui, b, &["activeWindowMinutes"], n_items(ui, &[(5, "minutes5"), (15, "minutes15"), (30, "minutes30"), (60, "minutes60")])))),
             row(
                 ui.t("taskRetention"),
                 None,
@@ -425,20 +429,15 @@ fn appearance(ui: &Ui, b: &mut Builder) -> El {
     let style = group(
         ui.opt("grpStyle"),
         vec![
-            row(
-                ui.t("bubbleStyle"),
-                None,
-                Some(combo(ui, b, &["layout"], s_items(ui, &[("chips", "layoutChips"), ("compact", "layoutCompact"), ("inline", "layoutInline"), ("outline", "layoutOutline"), ("cards", "layoutCards"), ("stacked", "layoutStacked")]))),
-            ),
             row(ui.t("fontSize"), None, Some(slider_control(b, SliderKey::FontSize, format!("{font_size:.1}")))),
-            row(ui.t("cornerRadius"), None, Some(slider_control(b, SliderKey::Radius, format!("{}", corner.round() as i64)))),
+            row(ui.t("cornerRadius"), ui.opt("cornerRadiusHint"), Some(slider_control(b, SliderKey::Radius, format!("{}", corner.round() as i64)))),
             row(ui.t("opacity"), None, Some(slider_control(b, SliderKey::Opacity, format!("{}%", (alpha * 100.0).round() as i64)))),
             row(
                 ui.t("transparencyMode"),
                 ui.opt("transparencyHint"),
                 Some(segments(ui, b, &["transparencyMode"], s_items(ui, &[("uniform", "transparencyUniform"), ("layered", "transparencyLayered"), ("focus", "transparencyFocus")]))),
             ),
-            switch_row(ui, b, &["showStatusDot"], "statusDot", None),
+            switch_row(ui, b, &["showStatusDot"], "statusDot", Some("statusDotHint")),
             switch_row(ui, b, &["animateUpdates"], "animateUpdates", Some("animateUpdatesTooltip")),
         ],
         None,
@@ -446,7 +445,7 @@ fn appearance(ui: &Ui, b: &mut Builder) -> El {
     let colors = group(
         ui.opt("grpColors"),
         vec![
-            row(ui.t("backgroundColor"), None, Some(color_control(ui, b, TextKey::Background, &ui.s(&["background"])))),
+            row(ui.t("backgroundColor"), ui.opt(if ui.s(&["themeStyle", "surface"]) == "solid" { "backgroundSolidHint" } else { "backgroundFallbackHint" }), Some(color_control(ui, b, TextKey::Background, &ui.s(&["background"])))),
             row(ui.t("foregroundColor"), None, Some(color_control(ui, b, TextKey::Foreground, &ui.s(&["foreground"])))),
             row(ui.t("accentColor"), None, Some(color_control(ui, b, TextKey::Accent, &ui.s(&["accent"])))),
         ],
@@ -496,6 +495,18 @@ fn main_bubble(ui: &Ui, b: &mut Builder) -> El {
     let layout = group(
         ui.opt("grpMainLayout"),
         vec![
+            row(
+                ui.t("bubbleStyle"),
+                ui.opt(match ui.s(&["layout"]).as_str() {
+                    "compact" => "layoutCompactHint",
+                    "inline" => "layoutInlineHint",
+                    "outline" => "layoutOutlineHint",
+                    "cards" => "layoutCardsHint",
+                    "stacked" => "layoutStackedHint",
+                    _ => "layoutChipsHint",
+                }),
+                Some(combo(ui, b, &["layout"], s_items(ui, &[("chips", "layoutChips"), ("compact", "layoutCompact"), ("inline", "layoutInline"), ("outline", "layoutOutline"), ("cards", "layoutCards"), ("stacked", "layoutStacked")]))),
+            ),
             row(ui.t("mainLead"), ui.opt("mainLeadHint"), Some(segments(ui, b, &["mainBubble", "lead"], s_items(ui, &[("metrics", "mainLeadMetrics"), ("rhythm", "mainLeadRhythm"), ("none", "mainLeadNone")])))),
             row(ui.t("mainStatus"), ui.opt("mainStatusHint"), Some(status_segments)),
             row(ui.t("mainQuotaStyle"), ui.opt("mainQuotaStyleHint"), Some(segments(ui, b, &["mainBubble", "quotaStyle"], s_items(ui, &[("groups", "mainQuotaGroups"), ("chips", "mainQuotaChips")])))),
@@ -542,7 +553,13 @@ fn main_bubble(ui: &Ui, b: &mut Builder) -> El {
         ],
         None,
     );
-    El::vstack().child(layout).child(metrics).child(rhythm).child(quota)
+    let mut page = El::vstack().child(layout);
+    match lead.as_str() {
+        "metrics" => page.push(metrics),
+        "rhythm" => page.push(rhythm),
+        _ => {}
+    }
+    page.child(quota)
 }
 
 fn tasks(ui: &Ui, b: &mut Builder) -> El {
@@ -550,18 +567,24 @@ fn tasks(ui: &Ui, b: &mut Builder) -> El {
         ui.opt("grpTaskDisplay"),
         vec![
             row(ui.t("displayMode"), ui.opt("multiTaskExplanation"), Some(segments(ui, b, &["multiTask", "displayMode"], s_items(ui, &[("summary", "modeSummary"), ("list", "modeList"), ("split", "modeSplit")])))),
-            row(ui.t("listStyle"), None, Some(combo(ui, b, &["multiTask", "listStyle"], s_items(ui, &[("rows", "listRows"), ("cards", "listCards"), ("rail", "listRail")])))),
-            row(ui.t("listDensity"), None, Some(combo(ui, b, &["multiTask", "listDensity"], s_items(ui, &[("compact", "listDensityCompact"), ("balanced", "listDensityBalanced"), ("relaxed", "listDensityRelaxed")])))),
-            row(ui.t("listFieldsTitle"), ui.opt("listDetailHint"), Some(combo(ui, b, &["multiTask", "listDetail"], s_items(ui, &[("compact", "listDetailCompact"), ("balanced", "listDetailBalanced"), ("detailed", "listDetailDetailed")])))),
-            row(ui.t("taskNameMode"), None, Some(combo(ui, b, &["multiTask", "nameMode"], s_items(ui, &[("always", "nameAlways"), ("hidden", "nameHidden")])))),
+            row(ui.t("listDensity"), ui.opt(match ui.s(&["multiTask", "listDensity"]).as_str() { "compact" => "listDensityCompactHint", "relaxed" => "listDensityRelaxedHint", _ => "listDensityBalancedHint" }), Some(combo(ui, b, &["multiTask", "listDensity"], s_items(ui, &[("compact", "listDensityCompact"), ("balanced", "listDensityBalanced"), ("relaxed", "listDensityRelaxed")])))),
+            row(ui.t("taskNameMode"), ui.opt("taskNameHint"), Some(combo(ui, b, &["multiTask", "nameMode"], s_items(ui, &[("always", "nameAlways"), ("hidden", "nameHidden")])))),
         ],
         None,
+    );
+    let list = group(
+        ui.opt("grpTaskList"),
+        vec![
+            row(ui.t("listStyle"), ui.opt(match ui.s(&["multiTask", "listStyle"]).as_str() { "cards" => "listCardsHint", "rail" => "listRailHint", _ => "listRowsHint" }), Some(combo(ui, b, &["multiTask", "listStyle"], s_items(ui, &[("rows", "listRows"), ("cards", "listCards"), ("rail", "listRail")])))),
+            row(ui.t("listFieldsTitle"), ui.opt("listDetailHint"), Some(combo(ui, b, &["multiTask", "listDetail"], s_items(ui, &[("compact", "listDetailCompact"), ("balanced", "listDetailBalanced"), ("detailed", "listDetailDetailed")])))),
+        ],
+        ui.opt("taskListScopeHint"),
     );
     let bubbles = group(
         ui.opt("taskBubbleFieldsTitle"),
         vec![
-            row(ui.t("maxSplitBubbles"), None, Some(combo(ui, b, &["multiTask", "maxSplitBubbles"], [3, 6, 9, 12].iter().map(|n| (Value::from(*n), n.to_string())).collect()))),
-            row(ui.t("numberCooldown"), None, Some(combo(ui, b, &["multiTask", "numberCooldownSeconds"], n_items(ui, &[(30, "seconds30"), (120, "minutes2"), (300, "minutes5"), (600, "minutes10")])))),
+            row(ui.t("maxSplitBubbles"), None, Some(combo(ui, b, &["multiTask", "maxSplitBubbles"], (1..=12).map(|n| (Value::from(n), n.to_string())).collect()))),
+            row(ui.t("numberCooldown"), None, Some(combo(ui, b, &["multiTask", "numberCooldownSeconds"], n_items(ui, &[(0, "numberCooldownOff"), (30, "seconds30"), (60, "minutes1"), (120, "minutes2"), (300, "minutes5"), (600, "minutes10")])))),
             switch_row(ui, b, &["multiTask", "autoSplitNewTasks"], "autoSplitNewTasks", None),
             chips(
                 ui,
@@ -578,9 +601,7 @@ fn tasks(ui: &Ui, b: &mut Builder) -> El {
         ],
         ui.opt("taskBubbleResizeHint"),
     );
-    let idle = group(
-        ui.opt("idleIndicatorTitle"),
-        vec![
+    let mut idle_rows = vec![
             switch_row(ui, b, &["behavior", "idleIndicator", "enabled"], "idleIndicatorEnabled", Some("idleIndicatorHint")),
             row(ui.t("idleIndicatorDelay"), None, Some(combo(ui, b, &["behavior", "idleIndicator", "afterMinutes"], n_items(ui, &[(5, "minutes5"), (15, "minutes15"), (30, "minutes30"), (60, "minutes60")])))),
             row(
@@ -588,12 +609,13 @@ fn tasks(ui: &Ui, b: &mut Builder) -> El {
                 None,
                 Some(combo(ui, b, &["behavior", "idleIndicator", "layout"], s_items(ui, &[("overall", "idleIndicatorOverall"), ("horizontal", "idleIndicatorHorizontal"), ("vertical", "idleIndicatorVertical")]))),
             ),
-            row(ui.t("idleIndicatorTaskStyle"), None, Some(segments(ui, b, &["behavior", "idleIndicator", "taskStyle"], s_items(ui, &[("dot", "idleIndicatorTaskDot"), ("bar", "idleIndicatorTaskBar")])))),
-            switch_row(ui, b, &["behavior", "idleIndicator", "includeTaskBubbles"], "idleIndicatorBubbles", None),
-        ],
-        None,
-    );
-    El::vstack().child(display).child(bubbles).child(idle)
+    ];
+    if ui.s(&["behavior", "idleIndicator", "layout"]) != "overall" {
+        idle_rows.push(row(ui.t("idleIndicatorTaskStyle"), None, Some(segments(ui, b, &["behavior", "idleIndicator", "taskStyle"], s_items(ui, &[("dot", "idleIndicatorTaskDot"), ("bar", "idleIndicatorTaskBar")])))));
+    }
+    idle_rows.push(switch_row(ui, b, &["behavior", "idleIndicator", "includeTaskBubbles"], "idleIndicatorBubbles", None));
+    let idle = group(ui.opt("idleIndicatorTitle"), idle_rows, None);
+    El::vstack().child(display).child(list).child(bubbles).child(idle)
 }
 
 fn alerts(ui: &Ui, b: &mut Builder) -> El {
@@ -719,6 +741,7 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
             source_row(ui, b, &["sessionSources", "vscode"], VSCODE, "#FF007ACC", true, "sourceVsCodeOption"),
             source_row(ui, b, &["sessionSources", "defaultCli"], CLI, "#FF8B5CF6", false, "sourceDefaultCliOption"),
             source_row(ui, b, &["sessionSources", "deepSeekCli"], DEEPSEEK, "#FF00A7B5", false, "sourceDeepSeekCliOption"),
+            row(ui.t("codexQuotaRow"), ui.opt("codexQuotaSourceHint"), Some(text(ui.codex_quota, 12.5, 400, MUTED))),
         ],
         None,
     );

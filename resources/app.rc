@@ -5,8 +5,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 4,0,0,0
-PRODUCTVERSION 4,0,0,0
+FILEVERSION 4,0,1,0
+PRODUCTVERSION 4,0,1,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -16,11 +16,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Agent Monitor HUD Contributors"
       VALUE "FileDescription", "Agent Monitor HUD"
-      VALUE "FileVersion", "4.0.0"
+      VALUE "FileVersion", "4.0.1"
       VALUE "InternalName", "AgentMonitorHUD"
       VALUE "OriginalFilename", "AgentMonitorHUD.exe"
       VALUE "ProductName", "Agent Monitor HUD"
-      VALUE "ProductVersion", "4.0.0"
+      VALUE "ProductVersion", "4.0.1"
       VALUE "LegalCopyright", "MIT License"
     END
   END

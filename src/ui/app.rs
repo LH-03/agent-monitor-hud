@@ -152,7 +152,7 @@ pub fn run(args: &[String]) -> i32 {
     let paths = HudPaths::resolve();
     let _ = std::fs::create_dir_all(&paths.state_root);
     crate::util::log::init(paths.log_path());
-    crate::util::log::write(format!("HUD 4.0.0 starting (managed={managed})"));
+    crate::util::log::write(format!("HUD {} starting (managed={managed})", env!("CARGO_PKG_VERSION")));
     std::panic::set_hook(Box::new(|info| {
         let thread = std::thread::current().name().unwrap_or("main").to_string();
         crate::util::log::write(format!("panic in {thread}: {info}"));
@@ -557,10 +557,19 @@ impl App {
         if view.revision == self.view.revision && Arc::ptr_eq(&view, &self.view) {
             return;
         }
+        let account_changed = self.view.account != view.account;
         self.view = view;
         self.synchronize_bubbles();
         self.process_attention();
         self.render();
+        // Account queries finish asynchronously; refresh an open settings page
+        // even when no task (or HUD bubble) is visible.
+        if account_changed {
+            if let Some(mut settings) = self.settings_window.take() {
+                settings.render(self);
+                self.settings_window = Some(settings);
+            }
+        }
     }
 
     pub fn locale(&self) -> Arc<crate::locale::Locale> {
@@ -627,7 +636,7 @@ impl App {
         self.main_actions = actions;
         let max_w = ((monitor.bounds.right - monitor.bounds.left) as f32 / dpi + inset * 2.0).max(480.0);
         self.load_image_resource();
-        self.main.set_root(&self.gfx, root, (max_w, f32::INFINITY));
+        self.main.set_root_quiet(&self.gfx, root, (max_w, f32::INFINITY), self.quiet, self.settings.animate_updates);
         self.apply_list_scroll();
         self.position_main();
         self.main.alpha = if self.settings.transparency_mode == "uniform" { (self.settings.opacity * 255.0).round().clamp(0.0, 255.0) as u8 } else { 255 };
@@ -778,6 +787,7 @@ impl App {
             .take(s.max_split_bubbles)
             .map(|t| t.key.clone())
             .collect();
+        self.detached.retain(|key| allowed.contains(key));
         self.bubbles.retain(|key, _| allowed.contains(key));
         for key in allowed {
             if self.bubbles.contains_key(&key) {
@@ -806,7 +816,7 @@ impl App {
             let bubble = self.bubbles.get_mut(key).unwrap();
             let root = hud::build_bubble(&ctx, &task, bubble.collapsed, bubble.manual_size);
             bubble.surface.refresh_dpi();
-            bubble.surface.set_root(&self.gfx, root, (960.0, 360.0));
+            bubble.surface.set_root_quiet(&self.gfx, root, (960.0, 360.0), bubble.collapsed, self.settings.animate_updates);
             bubble.surface.alpha = if self.settings.transparency_mode == "uniform" { (self.settings.opacity * 255.0).round() as u8 } else { 255 };
         }
         self.position_bubbles();
@@ -1008,7 +1018,7 @@ impl App {
             }
         }
         // Summary surface: only the newest reminder, only in summary mode.
-        if s.display_mode == "summary" {
+        if !list {
             if let Some(t) = tasks.iter().filter(|t| t.attention_until > now).max_by_key(|t| t.attention_revision) {
                 if t.attention_revision > self.summary_attention {
                     self.summary_attention = t.attention_revision;
@@ -1022,11 +1032,10 @@ impl App {
                             self.anims.insert(hud::fx_key("main.shell"), anim::agent(&s, recipe.as_ref(), nowf, until));
                         }
                         "context" => {
-                            let target = if s.field("context") { "main.context" } else { "main.shell" };
-                            self.anims.insert(hud::fx_key(target), anim::context(&s, t.context_level, nowf, until));
+                            self.anims.insert(hud::fx_key("main.shell"), anim::context(&s, t.context_level, nowf, until));
                         }
                         _ => {
-                            if let Some(a) = anim::dot(&s, &s.status_color(self.view.overall_status), nowf, until) {
+                            if s.show_status_dot && let Some(a) = anim::dot(&s, &s.status_color(self.view.overall_status), nowf, until) {
                                 self.anims.insert(hud::fx_key("main.dot"), a);
                             }
                             if let Some(a) = anim::surface(&s, &s.attention.summary_mode, nowf, until) {
@@ -1115,7 +1124,7 @@ impl App {
     fn ensure_anim_timer(&mut self) {
         let now = time::now_ms() as f64;
         self.anims.retain(|_, a| !a.finished(now));
-        let moving = self.anims.values().any(|a| a.moving(now));
+        let moving = self.anims.values().any(|a| a.moving(now)) || self.main.transitioning() || self.bubbles.values().any(|b| b.surface.transitioning());
         if moving && !self.animating {
             unsafe {
                 SetTimer(Some(self.main.hwnd), TIMER_ANIM, 16, None);
@@ -1132,12 +1141,13 @@ impl App {
     fn on_anim_tick(&mut self) {
         let now = time::now_ms() as f64;
         let keys: Vec<u64> = self.anims.iter().filter(|(_, a)| a.moving(now) || a.moving(now - 40.0)).map(|(k, _)| *k).collect();
-        if keys.is_empty() {
+        let mut windows: Vec<HWND> = self.bubbles.values().filter(|b| b.surface.transitioning()).map(|b| b.surface.hwnd).collect();
+        if self.main.transitioning() { windows.push(self.main.hwnd); }
+        if keys.is_empty() && windows.is_empty() {
             self.ensure_anim_timer();
             return;
         }
         // Repaint only the windows that host a moving element.
-        let mut windows: Vec<HWND> = Vec::new();
         for key in keys {
             if self.main.root.as_ref().is_some_and(|r| layout::find_fx(r, key).is_some()) {
                 windows.push(self.main.hwnd);
@@ -1735,6 +1745,9 @@ impl App {
     pub fn apply_document(&mut self) {
         let previous_mode = self.settings.display_mode.clone();
         self.settings = Settings::from(&self.document);
+        if self.settings.display_mode != previous_mode {
+            self.list_override = None;
+        }
         self.engine.send(Command::Settings(Box::new(self.settings.clone())));
         if self.settings.display_mode == "split" && previous_mode != "split" {
             self.split_all();
@@ -1743,6 +1756,10 @@ impl App {
         }
         self.images.clear();
         self.synchronize_bubbles();
+    }
+
+    pub(super) fn reset_list_override(&mut self) {
+        self.list_override = None;
     }
 
     fn reload_settings(&mut self) {
@@ -1755,8 +1772,9 @@ impl App {
         if by_user {
             let _ = std::fs::write(control::manual_exit_marker(&self.paths), time::utc_iso(time::now_ms()));
         }
-        if let Some(settings) = self.settings_window.as_mut() {
-            settings.flush(&self.paths);
+        if let Some(mut settings) = self.settings_window.take() {
+            settings.flush(self);
+            self.settings_window = Some(settings);
         }
         self.engine.send(Command::Quit);
         unsafe {

@@ -58,7 +58,7 @@ pub fn read(codex_home: PathBuf) -> Option<Official> {
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
     let requests = [
-        r#"{"method":"initialize","id":1,"params":{"clientInfo":{"name":"agent-monitor-hud","version":"4.0.0"},"capabilities":{"optOutNotificationMethods":["account/updated","account/rateLimits/updated"]}}}"#,
+        r#"{"method":"initialize","id":1,"params":{"clientInfo":{"name":"agent-monitor-hud","version":"4.0.1"},"capabilities":{"optOutNotificationMethods":["account/updated","account/rateLimits/updated"]}}}"#,
         r#"{"method":"initialized","params":{}}"#,
         r#"{"method":"account/rateLimits/read","id":2,"params":{}}"#,
     ];

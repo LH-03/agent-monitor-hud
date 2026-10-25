@@ -5,6 +5,7 @@ pub mod gfx;
 pub mod hud;
 pub mod image;
 pub mod layout;
+pub mod morph;
 pub mod paint;
 pub mod preview;
 pub mod settings;

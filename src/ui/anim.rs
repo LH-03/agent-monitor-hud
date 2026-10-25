@@ -137,7 +137,7 @@ fn flow_stops(p: &EffectProfile) -> Vec<(f32, Color)> {
 
 /// Status-dot reminder (`StartDot`).
 pub fn dot(s: &Settings, dot_color: &str, now: f64, until: f64) -> Option<Anim> {
-    if !s.attention.dot_enabled || !s.show_status_dot {
+    if !s.attention.dot_enabled {
         return None;
     }
     let cycle = match s.attention.dot_speed.as_str() {

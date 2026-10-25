@@ -52,6 +52,52 @@ pub fn run(args: &[String]) -> i32 {
     let view = View { revision: 1, tasks: tasks.clone(), overall_status: "active", display: Some(display), initial_scan_complete: true, paused: false, ledger, account: Default::default() };
     let scenes = args.get(2).map(String::as_str).unwrap_or("all");
     let wanted = |name: &str| scenes == "all" || scenes.split(',').any(|s| s == name);
+    if wanted("density-review") {
+        let mut review = view.clone();
+        let mut task = synthetic(1, now);
+        task.workspace = "Codex".into();
+        task.title = "检查主气泡与任务列表的显示效果".into();
+        task.status = "completed";
+        if let Some(s) = task.snapshot.as_mut() {
+            s.model = "gpt-6.1-sol".into(); s.context_percent = 83.1;
+            s.input = 100_000; s.cached = 99_960;
+        }
+        review.ledger.today_tokens = 102_400_000;
+        review.ledger.today_cost = None;
+        let mut review_tasks = tasks.clone();
+        for (i, t) in review_tasks.iter_mut().enumerate() {
+            t.workspace = ["Codex", "工具箱", "示例工程", "界面设计", "Codex", "文档"][i].into();
+            t.title = ["检查主气泡与任务列表的显示效果", "更新", "整理资料并核对输入输出", "检查对齐", "修复设置窗口", "补充使用说明"][i].into();
+            t.number = [1, 2, 3, 8, 12, 24][i];
+            t.status = ["active", "idle", "completed", "active", "idle", "completed"][i];
+            if let Some(s) = t.snapshot.as_mut() {
+                s.context_percent = [83.1, 7.5, 49.7, 100.0, 61.2, 24.0][i];
+                s.model = ["gpt-6.1-sol", "gpt-6-sol", "Claude", "DeepSeek", "gpt-6.1-sol", "Claude"][i].into();
+            }
+            if i == 2 || i == 5 { t.source = Source::Claude; t.client = "claude-desktop"; }
+            if i == 3 { t.source = Source::Dsh; t.client = "dsh-desktop"; }
+        }
+        if let Some(s) = review.display.as_mut() {
+            s.five_hour_remaining = Some(8.0); s.weekly_remaining = Some(85.0);
+            s.claude_five_hour_remaining = Some(45.0); s.claude_weekly_remaining = Some(40.0);
+            s.dsh_balance = Some("¥23.50".into()); s.dsh_balance_value = Some(23.50);
+        }
+        for count in [1, 6] {
+            review.tasks = if count == 1 { vec![task.clone()] } else { review_tasks.clone() };
+            if let Some(s) = review.display.as_mut() { s.active_tasks = count; }
+            for density in ["compact", "balanced", "relaxed"] {
+                let mut document = config::defaults();
+                document["language"] = Value::from("zh-CN");
+                if let Some(patch) = std::env::var("CODEX_MONITOR_HUD_PREVIEW_PATCH").ok().and_then(|p| serde_json::from_str::<Value>(&p).ok()) { config::merge_into(&mut document, &patch); }
+                document["multiTask"]["listDensity"] = Value::from(density);
+                let settings = Settings::from(&document);
+                let ctx = hud::Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now, image_available: false };
+                let mut root = hud::build_main(&ctx, &MainModel { view: &review, detached: &HashSet::new(), list_visible: true, quiet: false, overall: "active", show_grip: false, spread: (settings.main.spread_x as f32, settings.main.spread_y as f32) }, &mut ActionMap::new());
+                if settings.transparency_mode == "uniform" { root.opacity = settings.opacity as f32; }
+                if let Err(error) = render_png(&gfx, root, &out.join(format!("density-{density}-{count}.png"))) { eprintln!("density review: {error}"); }
+            }
+        }
+    }
     for scene in ["general", "appearance", "advanced", "main", "tasks", "alerts", "agents", "general-en", "main-en", "agents-en"] {
         let name = format!("settings-{scene}");
         if wanted(&name) || wanted("settings") {
@@ -185,7 +231,7 @@ pub fn run(args: &[String]) -> i32 {
     0
 }
 
-fn synthetic(i: u32, now: i64) -> TaskView {
+pub(super) fn synthetic(i: u32, now: i64) -> TaskView {
     let clients = ["cli", "desktop", "vscode"];
     let client = clients[(i % 3) as usize];
     let snapshot = Snapshot {
@@ -230,6 +276,150 @@ fn synthetic(i: u32, now: i64) -> TaskView {
         exit_completed: false,
         exit_until: time::MIN,
         exit_revision: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::layout;
+
+    fn find<'a>(root: &'a El, predicate: &impl Fn(&El) -> bool) -> Option<&'a El> {
+        if predicate(root) { return Some(root) }
+        root.children.iter().find_map(|child| find(child, predicate))
+    }
+
+    fn typography(root: &El, out: &mut Vec<(String, String, u32, u16)>) {
+        if let layout::Kind::Text { text, font, .. } = &root.kind {
+            out.push((text.clone(), font.family.clone(), font.size_x100, font.weight));
+        }
+        for child in &root.children { typography(child, out); }
+    }
+
+    #[test]
+    fn list_spacing_and_badges_follow_layout_at_different_font_sizes() {
+        unsafe { let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); }
+        let gfx = Gfx::new().expect("native graphics");
+        let catalog = Catalog::load(Path::new("nonexistent-preview-locales"));
+        let now = 1000;
+        let task = synthetic(1, now);
+        let view = View { tasks: vec![task.clone()], display: task.snapshot.clone(), ..Default::default() };
+        let detached = HashSet::new();
+        let layout_ctx = LayoutCtx { gfx: &gfx, scale: 1.0 };
+        for font_size in [14.0, 22.0] {
+            for style in ["rows", "cards", "rail"] {
+                let mut previous_height = 0.0;
+                for density in ["compact", "balanced", "relaxed"] {
+                    let mut doc = config::defaults();
+                    doc["fontSize"] = Value::from(font_size);
+                    doc["multiTask"]["listStyle"] = Value::from(style);
+                    doc["multiTask"]["listDensity"] = Value::from(density);
+                    doc["multiTask"]["listDetail"] = Value::from("detailed");
+                    let settings = Settings::from(&doc);
+                    let ctx = hud::Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now, image_available: false };
+                    let mut model = MainModel { view: &view, detached: &detached, list_visible: true, quiet: false, overall: "active", show_grip: false, spread: (0.0, 0.0) };
+                    let mut root = hud::build_main(&ctx, &model, &mut ActionMap::new());
+                    layout_root(&mut root, (1400.0, f32::INFINITY), &layout_ctx);
+                    let row_fx = hud::fx_key("row.surface:synthetic-1");
+                    let height = find(&root, &|el| el.fx == row_fx).unwrap().desired.1;
+                    assert!(height > previous_height, "{style}/{density}/{font_size}: spacing must grow");
+                    previous_height = height;
+                    let source_tip = hud::source_label(&task, &catalog.zh);
+                    let badge = find(&root, &|el| el.tip.as_deref() == Some(source_tip.as_str())).unwrap();
+                    assert!(badge.rect.h < height - 10.0, "source badge must not stretch with diagnostic rows");
+
+                    model.spread.1 = 1.0;
+                    let mut spread = hud::build_main(&ctx, &model, &mut ActionMap::new());
+                    layout_root(&mut spread, (1400.0, f32::INFINITY), &layout_ctx);
+                    let spread_height = find(&spread, &|el| el.fx == row_fx).unwrap().desired.1;
+                    assert!(spread_height > height, "{style}: corner spacing must also affect this list style");
+                }
+            }
+        }
+        let mut heights = Vec::new();
+        let mut original_type = None;
+        for density in ["compact", "balanced", "relaxed"] {
+            let mut doc = config::defaults();
+            doc["multiTask"]["listDensity"] = Value::from(density);
+            doc["multiTask"]["listDetail"] = Value::from("compact");
+            let settings = Settings::from(&doc);
+            let ctx = hud::Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now, image_available: false };
+            let mut row = hud::task_row(&ctx, &task, 0, false, 0.0, &mut ActionMap::new());
+            let mut content = Vec::new();
+            typography(&row, &mut content);
+            let summary = hud::build_main(&ctx, &MainModel { view: &view, detached: &detached, list_visible: false, quiet: false, overall: "active", show_grip: false, spread: (0.0, 0.0) }, &mut ActionMap::new());
+            typography(&summary, &mut content);
+            typography(&hud::build_bubble(&ctx, &task, false, None), &mut content);
+            if let Some(original) = &original_type { assert_eq!(&content, original, "density must not change text, typography or identity lines"); }
+            else { original_type = Some(content); }
+            heights.push(layout_root(&mut row, (1400.0, f32::INFINITY), &layout_ctx).1);
+            let mut model = MainModel { view: &view, detached: &detached, list_visible: true, quiet: true, overall: "idle", show_grip: false, spread: (0.0, 0.0) };
+            let mut quiet = hud::build_main(&ctx, &model, &mut ActionMap::new());
+            let size = layout_root(&mut quiet, (1400.0, f32::INFINITY), &layout_ctx);
+            let shell = layout::find_fx(&quiet, hud::fx_key("main.shell")).unwrap();
+            let dot = layout::find_fx(&quiet, hud::fx_key("main.dot")).unwrap();
+            assert!((shell.cx() - dot.cx()).abs() < 0.5 && (shell.cy() - dot.cy()).abs() < 0.5);
+            assert!(size.0 <= 70.0 && size.1 <= 60.0);
+            model.spread = (1.0, 1.0);
+            let mut spread = hud::build_main(&ctx, &model, &mut ActionMap::new());
+            assert_eq!(layout_root(&mut spread, (1400.0, f32::INFINITY), &layout_ctx), size);
+        }
+        assert!(heights[0] <= 34.0, "compact keeps both identity lines with minimal padding: {heights:?}");
+        assert!(heights[1] >= heights[0] + 6.0 && heights[2] >= heights[1] + 6.0, "spacing tiers must be distinct: {heights:?}");
+    }
+
+    #[test]
+    fn task_columns_align_without_fixed_title_widths() {
+        unsafe { let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); }
+        let gfx = Gfx::new().expect("native graphics");
+        let catalog = Catalog::load(Path::new("nonexistent-preview-locales"));
+        let mut tasks: Vec<_> = (1..=3).map(|i| synthetic(i, 1000)).collect();
+        tasks[0].title = "更新".into();
+        tasks[1].title = "检查长标题在不同字号下的列对齐".into();
+        tasks[1].number = 12;
+        tasks[2].title = "检查设置".into();
+        tasks[2].number = 103;
+        tasks[2].snapshot.as_mut().unwrap().context_percent = 100.0;
+        let view = View { tasks, display: Some(Snapshot::default()), ..Default::default() };
+        for size in [14.0, 22.0] {
+            for style in ["rows", "cards", "rail"] {
+                for density in ["compact", "balanced", "relaxed"] {
+                    let mut doc = config::defaults();
+                    doc["fontSize"] = Value::from(size);
+                    doc["multiTask"]["listStyle"] = Value::from(style);
+                    doc["multiTask"]["listDensity"] = Value::from(density);
+                    let settings = Settings::from(&doc);
+                    let ctx = hud::Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
+                    let mut root = hud::build_main(&ctx, &MainModel { view: &view, detached: &HashSet::new(), list_visible: true, quiet: false, overall: "active", show_grip: false, spread: (0.0, 0.0) }, &mut ActionMap::new());
+                    layout_root(&mut root, (1600.0, f32::INFINITY), &LayoutCtx { gfx: &gfx, scale: 1.5 });
+                    let mut columns = None;
+                    let mut last_bottom = 0.0;
+                    for (i, task) in view.tasks.iter().enumerate() {
+                        let row = find(&root, &|el| el.fx == hud::fx_key(&format!("row.surface:{}", task.key))).unwrap();
+                        assert!(row.rect.y >= last_bottom - 0.01);
+                        last_bottom = row.rect.y + row.rect.h;
+                        let coords: Vec<_> = (1..=3).map(|group| find(row, &|el| el.width_group == group).unwrap().rect).collect();
+                        if let Some(previous) = &columns {
+                            for (a, b) in coords.iter().zip(previous as &Vec<Rect>) {
+                                assert!((a.x - b.x).abs() < 0.7 && (a.w - b.w).abs() < 0.7, "{style}/{density}/{size}: columns must line up");
+                            }
+                        }
+                        columns = Some(coords);
+                        let action = find(row, &|el| el.id == hud::ROW_BASE + i as u32 * 8 + hud::ROW_ACTION).unwrap();
+                        let dismiss = find(row, &|el| el.id == hud::ROW_BASE + i as u32 * 8 + hud::ROW_DISMISS).unwrap();
+                        assert!(action.rect.x + action.rect.w <= dismiss.rect.x);
+                        assert!(dismiss.rect.x + dismiss.rect.w <= row.rect.x + row.rect.w + 0.7);
+                    }
+                }
+            }
+        }
+        // Reusing a tree after text changes must shrink shared columns again.
+        let slot = |text: &str| El::text(text, hud::font(hud::UI_FAMILY, 14.0, 400), layout::Paint::None).shared_width(1);
+        let mut list = El::vstack().shared_widths().child(slot("short")).child(slot("a considerably longer title"));
+        let lc = LayoutCtx { gfx: &gfx, scale: 1.0 };
+        let old = layout_root(&mut list, (1000.0, 1000.0), &lc).0;
+        list.children[1] = slot("tiny");
+        assert!(layout_root(&mut list, (1000.0, 1000.0), &lc).0 < old / 2.0);
     }
 }
 

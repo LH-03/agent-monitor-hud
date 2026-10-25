@@ -9,8 +9,7 @@ your plan, all read locally.
 ![Main bubble with activity rhythm and quota groups](docs/images/hud-rhythm-dark.png)
 
 > **4.0 is a complete rewrite.** The 3.x C#/WPF app (plus a bundled .NET runtime and a Node.js MCP
-> host) was rewritten from scratch as one native Rust executable by **Claude Opus 5.5**
-> (Anthropic), working in Claude Code. The look, settings and plugin id stay the same.
+> host) was rewritten from scratch as one native Rust executable. The look, settings and plugin id stay the same.
 
 The HUD, settings, Claude hooks and MCP server use the same native executable. There is no
 bundled .NET runtime, Node.js host or WebView. See [the architecture](docs/ARCHITECTURE.md).

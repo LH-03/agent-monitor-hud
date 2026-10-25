@@ -5,6 +5,14 @@ Agent Monitor HUD 4.x is a single native Windows executable written in Rust. It 
 same look, settings file and plugin identity. The rewrite was done by Claude Opus 5.5 working
 in Claude Code; the 3.x source stays in this repository's history as the behavioural reference.
 
+## Measured footprint
+
+Migration records on the same Windows desktop show resident private memory changing from about
+176 MiB to 12–13 MiB (about 93% lower), and working set from about 177 MiB to 30 MiB (about 83%
+lower). The complete v4.0.0 release unpacks to 3.77 MB, including its documentation and screenshots.
+See [PERFORMANCE.md](PERFORMANCE.md) for dates, process boundaries, CPU normalization and exact
+artifact sizes.
+
 ## Process model
 
 One executable, `AgentMonitorHUD.exe` (no .NET, Node.js, PowerShell or WebView at runtime):

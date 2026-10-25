@@ -7,6 +7,8 @@ directing the design. Renamed from Codex Monitor HUD because it now watches more
 
 - One native executable replaces the WPF app, its bundled .NET runtime and the Node.js MCP
   host. Settings, hook handling and the MCP server are native executable modes.
+- Migration measurements record about 93% lower resident HUD private memory and 83% lower working
+  set. The complete release payload is about 98% smaller; see [performance details](docs/PERFORMANCE.md).
 - New sources: **Claude Code** (desktop Code tab and CLI, with lifecycle hooks and a `waiting`
   state for approvals/questions) and **DeepSeek Harness** (desktop).
 - Plan and balance: Claude 5-hour and weekly usage from Claude Desktop's local samples; optional

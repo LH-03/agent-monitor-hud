@@ -15,6 +15,22 @@ your plan, all read locally.
 The HUD, settings, Claude hooks and MCP server use the same native executable. There is no
 bundled .NET runtime, Node.js host or WebView. See [the architecture](docs/ARCHITECTURE.md).
 
+### Measured improvements
+
+Migration measurements on the same Windows desktop:
+
+| | 3.3.0 | 4.0.0 | Improvement |
+| --- | --- | --- | --- |
+| HUD private memory | ≈ 176 MiB | ≈ 12–13 MiB | **≈ 93% less** |
+| HUD working set | ≈ 177 MiB | ≈ 30 MiB | **≈ 83% less** |
+| App/runtime payload | ≈ 178 MB installed | ≈ 3.77 MB unpacked, including docs and screenshots | **≈ 98% smaller** |
+| Recorded idle CPU | — | ≈ 0.2% of one logical core | |
+
+The native executable is **2.38 MB**; the complete ZIP download is **1.49 MB**. Memory/CPU figures
+were recorded during the October 24–25 migration; sizes come from the published v4.0.0 archive.
+Memory rows cover the HUD process, excluding MCP helpers and agent applications.
+[Measurement scope and exact sizes →](docs/PERFORMANCE.md)
+
 ## What it watches
 
 | Agent | Surfaces | Plan / balance |

@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src-dotnet/CodexMonitorHud.App/CodexMonitorHud.App.csproj" />
-    <Project Path="src-dotnet/CodexMonitorHud.Core/CodexMonitorHud.Core.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests-dotnet/CodexMonitorHud.Core.Tests/CodexMonitorHud.Core.Tests.csproj" />
-  </Folder>
-</Solution>

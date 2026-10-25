@@ -1,49 +1,35 @@
 {
-  "schemaVersion": 1,
-  "product": "Codex Monitor HUD",
-  "version": "3.3.0",
-  "repository": "https://github.com/LH-03/codex-monitor-hud",
-  "releaseTag": "v3.3.0",
+  "schemaVersion": 2,
+  "product": "Agent Monitor HUD",
+  "version": "4.0.0",
+  "repository": "https://github.com/LH-03/agent-monitor-hud",
+  "releaseTag": "v4.0.0",
   "checksumAsset": "SHA256SUMS.txt",
   "platforms": {
     "windows-x64": {
-      "asset": "CodexMonitorHUD-windows-x64.zip",
-      "entrypoint": "scripts/install-windows-from-repository.ps1",
+      "asset": "AgentMonitorHUD-windows-x64.zip",
+      "entrypoint": "scripts/install.ps1",
+      "installRoot": "~/plugins/codex-monitor-hud",
       "stateRoot": "%LOCALAPPDATA%\\CodexMonitorHUD"
     }
   },
   "rules": {
-    "preferVerifiedRelease": true,
-    "sourceFallbackOnlyWhenReleaseMissing": true,
+    "verifyChecksum": true,
     "stopOnChecksumMismatch": true,
     "userLocalInstall": true,
     "preserveSettings": true,
-    "retainRollback": true,
+    "retainRollbackFrom3x": true,
     "readSessionContent": false,
-    "uploadLocalData": false
+    "uploadLocalData": false,
+    "handleUserApiKeys": false
   },
-  "operations": [
-    "install",
-    "repair",
-    "rollback",
-    "uninstall"
-  ],
+  "operations": {
+    "install": "scripts/install.ps1",
+    "rollback": "scripts/rollback.ps1",
+    "uninstall": "scripts/uninstall.ps1"
+  },
   "sourceBuild": {
-    "sdkVersion": "10.0.302",
-    "windows": "scripts/build-dotnet.ps1"
-  },
-  "health": {
-    "file": "hud.heartbeat",
-    "fields": [
-      "version",
-      "platform",
-      "architecture",
-      "installRoot",
-      "pluginRoot",
-      "config",
-      "heartbeat",
-      "rollbackPath",
-      "pluginRollbackPath"
-    ]
+    "toolchain": "rust-toolchain.toml",
+    "command": "cargo build --release"
   }
 }

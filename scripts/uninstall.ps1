@@ -1,34 +1,52 @@
+# Removes Agent Monitor HUD 4.x for the current user: the HUD's Claude Code
+# hooks/MCP entries, the plugin folder, its Codex cache copies, the personal
+# marketplace entry and the settings shortcuts.
+#
+# Kept: settings in %LOCALAPPDATA%\CodexMonitorHUD (pass -RemoveSettings to
+# delete them too) and any 3.x rollback copy under ~/plugins.
 param([switch]$RemoveSettings)
-
 $ErrorActionPreference = 'Stop'
 $pluginName = 'codex-monitor-hud'
-$targetRoot = Join-Path $HOME ('plugins\' + $pluginName)
+$plugins = Join-Path $HOME 'plugins'
+$plugin = Join-Path $plugins $pluginName
+$cacheRoot = Join-Path $HOME ".codex\plugins\cache\local\$pluginName"
 $marketplacePath = Join-Path $HOME '.agents\plugins\marketplace.json'
-$stateRoot = Join-Path $env:LOCALAPPDATA 'CodexMonitorHUD'
-$desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Monitor HUD Settings.lnk'
-$startMenuFolder = Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Monitor HUD'
+$sandbox = [bool]$env:CODEX_MONITOR_HUD_INSTALL_SANDBOX
+$desktopDir = if ($sandbox) { Join-Path $HOME 'Desktop' } else { [Environment]::GetFolderPath('Desktop') }
+$programsDir = if ($sandbox) { Join-Path $HOME 'Programs' } else { [Environment]::GetFolderPath('Programs') }
 
-New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
-[IO.File]::WriteAllText((Join-Path $stateRoot 'exit.signal'), [DateTime]::UtcNow.ToString('O'))
+# Run from a temporary copy: this script may live inside the folder being removed.
+if ($PSCommandPath -and -not $PSCommandPath.StartsWith($env:TEMP, [StringComparison]::OrdinalIgnoreCase)) {
+    $copy = Join-Path $env:TEMP 'agent-monitor-hud-uninstall.ps1'
+    Copy-Item $PSCommandPath $copy -Force
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $copy @(if ($RemoveSettings) { '-RemoveSettings' })
+    exit $LASTEXITCODE
+}
 
-if (Test-Path -LiteralPath $marketplacePath) {
-    $marketplace = Get-Content -Raw -Encoding UTF8 -LiteralPath $marketplacePath | ConvertFrom-Json
+$exe = Join-Path $plugin 'bin\AgentMonitorHUD.exe'
+if (Test-Path $exe) { & $exe unintegrate claude | Out-Null }
+if (-not $sandbox) {
+    Get-Process AgentMonitorHUD -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$plugin*" } |
+        ForEach-Object { $_.CloseMainWindow() | Out-Null; if (-not $_.WaitForExit(1500)) { $_ | Stop-Process -Force } }
+}
+Start-Sleep -Milliseconds 300
+
+if (Test-Path $plugin) { Remove-Item -Recurse -Force $plugin }
+if (Test-Path $cacheRoot) { Remove-Item -Recurse -Force $cacheRoot -ErrorAction SilentlyContinue }
+if (Test-Path $marketplacePath) {
+    $marketplace = Get-Content -Raw -Encoding UTF8 $marketplacePath | ConvertFrom-Json
     $marketplace.plugins = @($marketplace.plugins | Where-Object { $_.name -ne $pluginName })
-    $marketplace | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -LiteralPath $marketplacePath
+    [IO.File]::WriteAllText($marketplacePath, ($marketplace | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding $false))
 }
+Remove-Item (Join-Path $desktopDir 'Agent Monitor HUD Settings.lnk') -ErrorAction SilentlyContinue
+$startFolder = Join-Path $programsDir 'Agent Monitor HUD'
+if (Test-Path $startFolder) { Remove-Item -Recurse -Force $startFolder }
 
-if ((Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).Path -ne $targetRoot -and (Test-Path -LiteralPath $targetRoot)) {
-    Remove-Item -LiteralPath $targetRoot -Recurse -Force
+$state = Join-Path $env:LOCALAPPDATA 'CodexMonitorHUD'
+if ($RemoveSettings -and (Test-Path $state)) {
+    Remove-Item -Recurse -Force $state
+    Write-Output "Removed settings at $state"
 } else {
-    Write-Output "Plugin files remain at $targetRoot because the uninstaller is running from that directory. Remove it after Codex closes."
+    Write-Output "Settings kept at $state"
 }
-
-if ($RemoveSettings -and (Test-Path -LiteralPath $stateRoot)) {
-    Start-Sleep -Milliseconds 900
-    Remove-Item -LiteralPath $stateRoot -Recurse -Force
-}
-
-if (Test-Path -LiteralPath $desktopShortcut) { Remove-Item -LiteralPath $desktopShortcut -Force }
-if (Test-Path -LiteralPath $startMenuFolder) { Remove-Item -LiteralPath $startMenuFolder -Recurse -Force }
-
-Write-Output 'Codex Monitor HUD was removed from the personal marketplace.'
+Write-Output 'Agent Monitor HUD was uninstalled.'

@@ -1,0 +1,198 @@
+{
+  "_schema": "codex-monitor-hud-pricing-v1",
+  "_source": {
+    "name": "OpenAI API model pricing",
+    "url": "https://developers.openai.com/api/docs/models",
+    "checked_at": "2026-09-23",
+    "currency": "USD",
+    "unit": "per_million_text_tokens",
+    "note": "Standard short-context API text-token list-price estimate only; not a Codex subscription bill or usage-credit statement. Long-context (>272K input tokens), cache-write, Batch, Flex, Fast mode, regional-processing, and tool charges are not included.",
+    "anthropic": {
+      "name": "Anthropic Claude API list prices (first-party)",
+      "checked_at": "2026-10-24",
+      "note": "cache_write_5m = 1.25x input, cache_write_1h = 2x input; cache reads per model. Long-context tiers, batch, fast mode and subscription plans are not represented."
+    }
+  },
+  "aliases": {
+    "gpt-5.6": "gpt-5.6-sol"
+  },
+  "models": {
+    "gpt-5": {
+      "input_per_million": 1.25,
+      "cached_input_per_million": 0.125,
+      "output_per_million": 10.0
+    },
+    "gpt-5.1": {
+      "input_per_million": 1.25,
+      "cached_input_per_million": 0.125,
+      "output_per_million": 10.0
+    },
+    "gpt-5.2": {
+      "input_per_million": 1.75,
+      "cached_input_per_million": 0.175,
+      "output_per_million": 14.0
+    },
+    "gpt-5.2-pro": {
+      "input_per_million": 21.0,
+      "cached_input_per_million": 21.0,
+      "output_per_million": 168.0
+    },
+    "gpt-5.4": {
+      "input_per_million": 2.5,
+      "cached_input_per_million": 0.25,
+      "output_per_million": 15.0
+    },
+    "gpt-5.4-mini": {
+      "input_per_million": 0.75,
+      "cached_input_per_million": 0.075,
+      "output_per_million": 4.5
+    },
+    "gpt-5.4-nano": {
+      "input_per_million": 0.2,
+      "cached_input_per_million": 0.02,
+      "output_per_million": 1.25
+    },
+    "gpt-5.4-pro": {
+      "input_per_million": 30.0,
+      "cached_input_per_million": 30.0,
+      "output_per_million": 180.0
+    },
+    "gpt-5.5": {
+      "input_per_million": 5.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 30.0
+    },
+    "gpt-5.5-pro": {
+      "input_per_million": 30.0,
+      "cached_input_per_million": 30.0,
+      "output_per_million": 180.0
+    },
+    "gpt-5.6-luna": {
+      "input_per_million": 0.2,
+      "cached_input_per_million": 0.02,
+      "output_per_million": 1.2
+    },
+    "gpt-5.6-terra": {
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.2,
+      "output_per_million": 12.0
+    },
+    "gpt-5.6-sol": {
+      "input_per_million": 4.0,
+      "cached_input_per_million": 0.4,
+      "output_per_million": 20.0
+    },
+    "gpt-6-astra": {
+      "input_per_million": 10.0,
+      "cached_input_per_million": 1.0,
+      "output_per_million": 50.0
+    },
+    "gpt-6-luna": {
+      "input_per_million": 0.1,
+      "cached_input_per_million": 0.01,
+      "output_per_million": 0.5
+    },
+    "gpt-6-sol": {
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.2,
+      "output_per_million": 10.0
+    },
+    "codex-auto-review": {
+      "input_per_million": 1.5,
+      "cached_input_per_million": 0.375,
+      "output_per_million": 6.0,
+      "estimated": true
+    },
+    "claude-fable-5-1": {
+      "input_per_million": 10.0,
+      "cached_input_per_million": 0.25,
+      "output_per_million": 50.0,
+      "cache_write_5m_per_million": 12.5,
+      "cache_write_1h_per_million": 20.0
+    },
+    "claude-fable-5": {
+      "input_per_million": 10.0,
+      "cached_input_per_million": 1.0,
+      "output_per_million": 50.0,
+      "cache_write_5m_per_million": 12.5,
+      "cache_write_1h_per_million": 20.0
+    },
+    "claude-mythos-5-1": {
+      "input_per_million": 10.0,
+      "cached_input_per_million": 0.25,
+      "output_per_million": 50.0,
+      "cache_write_5m_per_million": 12.5,
+      "cache_write_1h_per_million": 20.0
+    },
+    "claude-opus-5-5": {
+      "input_per_million": 4.0,
+      "cached_input_per_million": 0.2,
+      "output_per_million": 20.0,
+      "cache_write_5m_per_million": 5.0,
+      "cache_write_1h_per_million": 8.0
+    },
+    "claude-opus-5": {
+      "input_per_million": 5.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 25.0,
+      "cache_write_5m_per_million": 6.25,
+      "cache_write_1h_per_million": 10.0
+    },
+    "claude-opus-4-8": {
+      "input_per_million": 5.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 25.0,
+      "cache_write_5m_per_million": 6.25,
+      "cache_write_1h_per_million": 10.0
+    },
+    "claude-opus-4-7": {
+      "input_per_million": 5.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 25.0,
+      "cache_write_5m_per_million": 6.25,
+      "cache_write_1h_per_million": 10.0
+    },
+    "claude-opus-4-6": {
+      "input_per_million": 5.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 25.0,
+      "cache_write_5m_per_million": 6.25,
+      "cache_write_1h_per_million": 10.0
+    },
+    "claude-sonnet-5-5": {
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.2,
+      "output_per_million": 10.0,
+      "cache_write_5m_per_million": 2.5,
+      "cache_write_1h_per_million": 4.0
+    },
+    "claude-sonnet-5": {
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.2,
+      "output_per_million": 10.0,
+      "cache_write_5m_per_million": 2.5,
+      "cache_write_1h_per_million": 4.0
+    },
+    "claude-sonnet-4-6": {
+      "input_per_million": 3.0,
+      "cached_input_per_million": 0.3,
+      "output_per_million": 15.0,
+      "cache_write_5m_per_million": 3.75,
+      "cache_write_1h_per_million": 6.0
+    },
+    "claude-haiku-5-5": {
+      "input_per_million": 0.1,
+      "cached_input_per_million": 0.01,
+      "output_per_million": 0.5,
+      "cache_write_5m_per_million": 0.125,
+      "cache_write_1h_per_million": 0.2
+    },
+    "claude-haiku-4-5": {
+      "input_per_million": 1.0,
+      "cached_input_per_million": 0.1,
+      "output_per_million": 5.0,
+      "cache_write_5m_per_million": 1.25,
+      "cache_write_1h_per_million": 2.0
+    }
+  }
+}

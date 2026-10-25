@@ -1,0 +1,178 @@
+{
+  "preset": "frost",
+  "language": "en",
+  "layout": "chips",
+  "numberFormat": "exact",
+  "monitorScope": "aggregate",
+  "activeWindowMinutes": 30,
+  "sessionSources": {
+    "desktop": true,
+    "vscode": true,
+    "defaultCli": true,
+    "deepSeekCli": true,
+    "claudeDesktop": true,
+    "claudeCli": true,
+    "deepseekHarness": true
+  },
+  "multiTask": {
+    "displayMode": "summary",
+    "listStyle": "rows",
+    "listDensity": "compact",
+    "listDetail": "balanced",
+    "nameMode": "always",
+    "maxSplitBubbles": 6,
+    "autoSplitNewTasks": true,
+    "numberCooldownSeconds": 120,
+    "listFields": {
+      "model": true,
+      "callTotal": true,
+      "cacheHitRate": false,
+      "taskTotal": false,
+      "estimatedCost": false,
+      "updated": false
+    },
+    "bubbleFields": {
+      "model": true,
+      "callTotal": true,
+      "cacheHitRate": false,
+      "taskTotal": true,
+      "estimatedCost": false,
+      "updated": true
+    }
+  },
+  "behavior": {
+    "openTaskOnDoubleClick": false,
+    "idleIndicator": {
+      "enabled": false,
+      "afterMinutes": 15,
+      "layout": "overall",
+      "taskStyle": "dot",
+      "includeTaskBubbles": true
+    },
+    "contextAlerts": {
+      "enabled": false,
+      "thresholds": [
+        75,
+        90,
+        98
+      ]
+    }
+  },
+  "attention": {
+    "summaryMode": "halo",
+    "listMode": "flow",
+    "taskBubbleMode": "flow",
+    "dotEnabled": true,
+    "dotPattern": "heartbeat",
+    "dotBrightness": "balanced",
+    "dotSpeed": "normal",
+    "dotBreathing": true,
+    "durationSeconds": 6,
+    "completionGraceSeconds": 8,
+    "onCompleted": true,
+    "onAbortedOrError": true,
+    "onWaiting": true,
+    "onSettled": false
+  },
+  "agentNotifications": {
+    "enabled": false,
+    "permission": "text",
+    "mode": "focus",
+    "durationSeconds": 12,
+    "color": "#FF7C3AED",
+    "glowPreset": "violet",
+    "intensity": "balanced"
+  },
+  "quotaGuard": {
+    "enabled": false,
+    "prepareFiveHourPercent": 15,
+    "prepareWeeklyPercent": 10,
+    "handoffFiveHourPercent": 5,
+    "handoffWeeklyPercent": 3,
+    "prepareInstruction": "",
+    "handoffInstruction": ""
+  },
+  "separator": "dot",
+  "position": "top-right",
+  "customLeft": null,
+  "customTop": null,
+  "fontSize": 14.0,
+  "cornerRadius": 22,
+  "opacity": 0.97,
+  "transparencyMode": "uniform",
+  "scale": 1.0,
+  "alwaysOnTop": true,
+  "mousePassthrough": false,
+  "showStatusDot": true,
+  "animateUpdates": true,
+  "themeStyle": {
+    "surface": "solid",
+    "gradientStart": "#EAF7F8FA",
+    "gradientEnd": "#EAF7F8FA",
+    "gradientAngle": 135,
+    "backgroundImage": "",
+    "imageOpacity": 0.28,
+    "imageStretch": "uniformToFill",
+    "shadow": "soft",
+    "borderWidth": 1.0,
+    "statusDotSize": 8.0,
+    "fontFamily": "Segoe UI Variable Text, Microsoft YaHei UI"
+  },
+  "statusPalette": "default",
+  "statusColors": {
+    "active": "#FF34C759",
+    "listening": "#FF0A84FF",
+    "idle": "#FFFF9F0A",
+    "paused": "#FF8E8E93",
+    "error": "#FFFF453A",
+    "completed": "#FF32D74B",
+    "aborted": "#FFFF453A",
+    "waiting": "#FFBF5AF2"
+  },
+  "statusTiming": {
+    "activeSeconds": 12,
+    "idleSeconds": 90,
+    "errorHoldSeconds": 30,
+    "terminalHoldSeconds": 120,
+    "terminalExitMode": "gentle"
+  },
+  "background": "#EAF7F8FA",
+  "foreground": "#FF111827",
+  "muted": "#FF667085",
+  "accent": "#FF0A84FF",
+  "border": "#33FFFFFF",
+  "pricing": {
+    "path": ""
+  },
+  "fields": {
+    "input": false,
+    "cached": true,
+    "cacheHitRate": false,
+    "uncached": true,
+    "output": true,
+    "reasoning": false,
+    "callTotal": true,
+    "taskTotal": false,
+    "context": false,
+    "model": false,
+    "updated": false,
+    "activeTasks": true,
+    "weeklyRemaining": true,
+    "fiveHourRemaining": true,
+    "claudeFiveHourRemaining": true,
+    "claudeWeeklyRemaining": true,
+    "dshBalance": true,
+    "estimatedCost": false
+  },
+  "mainBubble": {
+    "lead": "metrics",
+    "quotaStyle": "groups",
+    "statusStyle": "compact",
+    "hideEmpty": true,
+    "waitingBadge": true,
+    "rhythmMinutes": 30,
+    "rhythmCost": true,
+    "spreadX": 0,
+    "spreadY": 0
+  }
+}

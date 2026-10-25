@@ -1,0 +1,31 @@
+#pragma code_page(65001)
+#include <winver.h>
+
+1 ICON "assets/codex-monitor-hud.ico"
+1 24 "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 4,0,0,0
+PRODUCTVERSION 4,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "Agent Monitor HUD Contributors"
+      VALUE "FileDescription", "Agent Monitor HUD"
+      VALUE "FileVersion", "4.0.0"
+      VALUE "InternalName", "AgentMonitorHUD"
+      VALUE "OriginalFilename", "AgentMonitorHUD.exe"
+      VALUE "ProductName", "Agent Monitor HUD"
+      VALUE "ProductVersion", "4.0.0"
+      VALUE "LegalCopyright", "MIT License"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

@@ -1,236 +1,29 @@
 # Changelog
 
-## 3.3.0 - Runtime performance and GPT-6 pricing
+## 4.0.0 - Agent Monitor HUD: native Rust rewrite
 
-- Reduce allocations and repeated work in session parsing, file discovery, task aggregation, formatting, and WPF refreshes without changing the visible HUD behavior.
-- Add GPT-6 Sol and Luna to the bundled API-equivalent pricing snapshot using OpenAI's standard short-context text-token rates, checked on 2026-09-23.
-- Keep API cost as an estimate; long-context, cache-write, service-tier, regional-processing, and tool charges are outside this snapshot.
+Rewritten from scratch in Rust by Claude Opus 5.5 (Anthropic) in Claude Code, with the maintainer
+directing the design. Renamed from Codex Monitor HUD because it now watches more than Codex.
 
-## 3.2.2 - Astra pricing and official allowance
+- One native executable replaces the WPF app, its bundled .NET runtime and the Node.js MCP
+  host. Settings, hook handling and the MCP server are native executable modes.
+- New sources: **Claude Code** (desktop Code tab and CLI, with lifecycle hooks and a `waiting`
+  state for approvals/questions) and **DeepSeek Harness** (desktop).
+- Plan and balance: Claude 5-hour and weekly usage from Claude Desktop's local samples; optional
+  DeepSeek API balance with a DPAPI-encrypted key you enter yourself.
+- Main bubble: choose what leads (metrics, an activity-rhythm sparkline with today's total, or
+  nothing), a compact task status, per-agent quota meters that warn when low, and a waiting badge.
+  Dragging the corner loosens spacing within limits; type never scales.
+- Settings redesigned with a sidebar and six pages (General, Appearance, Main Bubble, Tasks,
+  Alerts, Agents).
+- Softer attention glow on list rows; the task list sizes to its content.
+- Updated task retention and watcher-driven incremental reads; stale MCP hosts are cleaned up.
+- Settings now opens in the HUD process, and the color picker uses native HSV controls.
+- Same settings folder (`%LOCALAPPDATA%\CodexMonitorHUD`), plugin id and themes. Installing over
+  3.x keeps the whole old plugin folder for `scripts\rollback.ps1`; `scripts\uninstall.ps1` is new.
+- The MCP server is now registered as `agent-monitor-hud`.
 
-- Add `gpt-6-astra` to the bundled API-equivalent pricing snapshot and refresh the current GPT-5.6 Sol, Terra, and Luna standard text-token prices.
-- Make signed-in official local allowance reading the fixed source; a Pro account with no 5-hour window keeps its weekly value while the unavailable window shows `--`.
-- Keep developer static and performance checks in the release workflow, while user installation validates the staged runtime before its transactional switch.
+## 3.x and earlier
 
-## 3.2.1 - Windows Release installer repair
-
-- Make the verified Windows Release install use its bundled private runtime even when a system .NET SDK is present, rather than unexpectedly rebuilding source during installation.
-- Pass the source root explicitly to core tests so a checked Release package can be installed from any download or extraction folder without a false “repository root” failure.
-
-## 3.2.0 - reliable allowance guard
-
-- Add an opt-in official local Codex allowance source for the normal profile. It reads only the 5-hour and weekly values through the already signed-in local Codex client; it never reads conversation text, provider configuration, or credentials.
-- Keep the official source authoritative when selected: a failed refresh shows both windows as unavailable and retries quickly instead of mixing a prior account's session-log value into the display after an account switch.
-- Make the allowance handoff guard a one-shot threshold transition with editable early-warning and critical templates. Threshold crossings are detected even when a provider jumps past a configured percentage, without repeatedly notifying below that threshold.
-- Ignore non-account `gpt-reserve` records, merge separately observed 5-hour and weekly local windows safely, and collapse duplicate entries that point at the same active conversation.
-
-## 3.1.0 - VS Code monitoring and polish
-
-- Monitor Codex in VS Code as its own source beside Codex Desktop and CLI. The new VS Code ribbon badge, source filter, and summary count make it clear where each active task came from.
-- Keep free positioning truly free: dragging no longer snaps when a bubble merely approaches an edge. The visible surface reaches an edge only when the cursor reaches that physical display edge.
-- Make the three transparency modes visibly distinct, allow a genuinely opaque 100% setting, and apply a mode change immediately from Settings without touching the opacity slider.
-- Keep per-task context usage, cache hit rate, source identity, task title, and independent bubble behavior intact across Desktop, VS Code, normal CLI, and the optional isolated DeepSeek CLI profile.
-- Streamline the public documentation around installing, using, theming, integrating, and adapting the HUD.
-
-## 3.0.0 - Desktop and CLI monitoring
-
-- Keep task discovery responsive during long Desktop work by reconciling the privacy-safe runtime heartbeat every two seconds without increasing full JSONL directory scans. Silent `task_complete` records no longer terminate or hide a conversation; visible turn completions retain the continuation guard and are cancelled by newer runtime activity.
-- Rebuild task-list information density around operator priority. Every tier shows source, project/conversation identity, model, context usage, and cache hit rate; Balanced adds the current call total; Detailed wraps input composition, output, task cumulative total, provider-reported context-window capacity, cost, and update time onto a second line.
-- Use each task's own `model_context_window`, including the isolated DeepSeek CLI profile. Missing provider metadata renders as `--` with an explanatory tooltip instead of pretending the task uses a GPT window.
-- Prevent near-perfect cache hit or context values from rounding to a false `100%`. Exact 100% remains available only when the underlying value actually reaches the boundary.
-- Keep the summary bubble semantically aggregate-only: per-task cache hit rate, context, model, task cumulative total, and update time are excluded even when an older user configuration still enables those keys.
-- Let the visible HUD surface and detached bubbles truly touch the selected work-area edge by accounting for their transparent glow canvas. Custom coordinates now describe the visible shell, so an existing top value of zero migrates naturally to the real top edge.
-- Keep long-running Codex Desktop tasks visible even when their parent JSONL stops writing: the Windows host now reads only `id`, `rollout_path`, `updated_at_ms`, `thread_source`, and `archived` from each profile's `state_5.sqlite` in read-only mode. Fresh top-level `user` heartbeats supplement JSONL discovery; subagents, archived rows, prompt text, replies, titles, and previews are never queried.
-- Normalize Windows extended-length rollout paths such as `\\?\C:\...` and clear stale terminal tails when newer runtime activity proves that a resumed task is still alive. Runtime activity keeps its three-minute active-color freshness, while discovery retains the task for the configured recent-task window (30 minutes by default), preventing long silent inference from dropping the row without turning it into a permanent green ghost. Missing/locked/changed databases fall back to the existing bounded JSONL path.
-- Keep the state/activity contract injectable in the platform-neutral Core and place `winsqlite3.dll` access only in the Windows App and retained legacy host, preserving future host portability without adding a NuGet/runtime dependency.
-- Show official conversation subtitles without requiring hover by default; old `hover` settings normalize to the always-visible mode while `hidden` remains available.
-- Monitor Codex Desktop, the normal Codex CLI profile, and an isolated `~/.codex-deepseek` profile in one globally bounded task table, with independent source filters.
-- Add three polished source marks before every task number in list and detached-bubble surfaces: Desktop window, OpenAI CLI terminal, and DeepSeek CLI wave-terminal. Add a summary source breakdown without relying on hard-coded model names.
-- Make the close action on a detached task bubble merge only that bubble back into the main HUD; list-row dismissal remains a separate task-visibility action.
-- Clear both intentional-stop signals before starting a newly installed or rolled-back host, preventing an otherwise healthy replacement from immediately consuming a stale exit request.
-- Exclude PowerShell's root-level `Microsoft/Windows/PowerShell/ModuleAnalysisCache` artifact from Git, installed trees, Release staging, and transfer kits.
-- Upgrade the optional local MCP server to negotiate the current `2025-11-25` revision while retaining compatible older revisions, and add tool titles, annotations, structured results, output schemas, explicit tool errors, status inspection, and source-aware task targeting.
-- Add a cache-hit-rate metric calculated as cached input tokens divided by total input tokens in the latest displayed snapshot. It is a per-task signal shown in every task-list tier and remains independently optional on split bubbles; it is intentionally not summed or averaged in the main summary.
-- Keep monitoring model-agnostic: unfamiliar future model IDs continue to show status, tokens, cache ratio, context and lifecycle without code changes.
-- Resolve API-cost catalog aliases case-insensitively and reuse a known catalog entry for its dated model snapshots. Completely new or unknown prices remain `--` instead of inheriting a potentially wrong family price.
-- Refresh the bundled GPT-5.6 Terra and Luna standard text-token prices against the official model pages on 2026-08-10.
-
-## 2.2.1 - Windows maintenance release
-
-- Refresh the bundled standard API list-price snapshot from OpenAI's official pricing page on 2026-08-03: GPT-5.6 Terra is now `$2.00 / $0.20 / $12.00`, and GPT-5.6 Luna is now `$0.20 / $0.02 / $1.20`, per million input / cached-input / output tokens.
-- Keep estimates deliberately scoped to standard short-context API list price. They do not represent ChatGPT/Codex subscription billing, credits, long-context, Batch, Flex, Fast mode, regional-processing, or cache-write prices.
-- Improve portable setup guidance while keeping local settings, session data, logs, and private experiments out of the public package.
-
-## 2.2.0 - Windows release candidate
-
-- Permit the full 0% to 100% HUD opacity range in Settings, configuration normalization, live preview, and the compatible fallback host.
-- Expose the latest locally observed 5-hour allowance alongside the existing weekly allowance. The account-level value is displayed only when Codex emits it; it is never guessed or summed across tasks.
-- Decouple the aggregate list expand/collapse control from split-bubble ownership, so retracting the list leaves detached task bubbles open.
-- Move the resident monitor from the monolithic Windows PowerShell process to a compiled .NET 10 host while retaining the complete Settings host on demand and a `-Legacy` rollback path.
-- Introduce a platform-neutral `CodexMonitorHud.Core` for bounded discovery, incremental JSONL streaming, privacy-safe identity, lifecycle, accounting, configuration, pricing, and presentation rules.
-- Add the Windows WPF shell with summary/list/split/quiet surfaces, retained-control updates, independent task bubbles, tray recovery, click-through, DPI integration, attention choreography, MCP notices, and task deep links.
-- Make the file watcher path-driven: ordinary writes poll only changed files; structural events, overflow, and periodic reconciliation trigger bounded rediscovery.
-- Add a zero-dependency Core regression executable, a compiled health check, private runtime staging, compiled-first startup, and automatic legacy fallback.
-- Make installation transactional: validate the staged compiled copy before switching, retain a versioned installed rollback copy, expose an explicit version rollback command, and restore the previous tree and marketplace if any post-switch step fails.
-- Add adaptive polling with watcher-driven wake-up, bounded parser backpressure, incremental official-title refresh, bounded MCP heartbeat restart, and same-fixture legacy/compiled process metrics.
-- Preserve all `2.1.0` defaults, state/privacy contracts, XAML assets, locale catalogs, settings storage, and optional-feature opt-in behavior.
-- Define a deterministic Windows repository-link install protocol: prefer an exact checksummed Release, fall back to a trusted source build only when the Release is missing, preserve settings, health-check before switching, and retain a rollback copy.
-- macOS is not supported or packaged. Source-level adaptation by community users is welcome, but this project releases and validates Windows only.
-
-## 2.1.0 - 2026-07-16
-
-- Restore a two-line task-list identity with project/workspace as the main title and official Codex conversation title plus time in the subtitle behavior.
-- Cache unchanged locale, appearance, metric, list, quiet-indicator and menu projections instead of rebuilding them on every 800 ms dispatcher tick.
-- Stream bounded session tails, reject irrelevant records before full JSON parsing, reuse file identities and stop tailing confirmed internal sessions.
-- Move Settings and Color Picker into an on-demand process and hot-reload saved configuration in the resident HUD.
-- Return unused working-set pages to Windows after updates while rate-limiting full managed collections; document the separate PowerShell/WPF committed-memory high-water mark.
-- Prevent a fully populated top metric row from clipping the task-count toggle by using explicit header columns and a minimum expanded-list width.
-- Promote the v2 line from preview to stable and make English the safe fallback for manual or unsupported-language installs.
-- Let Codex's install prompt select Simplified Chinese or English on first install without overwriting an existing language preference.
-- Add an opt-in, official `codex://threads/<thread-id>` double-click path from task rows and independent bubbles.
-- Redesign symbol-only HUD metrics and task status labels as a consistent geometric vocabulary.
-- Expand the optional quiet indicator from one overall status light to a choice of one large overall light or a separated horizontal/vertical strip of numbered task lights. Task markers support dots and rounded bars; completed/aborted markers remain visible while the strip sleeps, then normal departure resumes after wake-up.
-- Keep every existing status-color scheme and add a Codex Micro display-reference scheme using five values sampled from OpenAI's public product page. Reuse those values for the HUD's two additional lifecycle states; the mapping is local, unofficial, and not a color-match guarantee. See `COLOR_ATTRIBUTION.md`.
-- Add directly editable context-usage alert thresholds with calmer 75% / 90% / 98% defaults. One to three values are accepted, automatically deduplicated and sorted, with one reminder per upward crossing and automatic rearming after compaction or lower usage.
-- Restrict context-alert motion and glow to the context-usage metric itself: level 1 uses a soft blue pulse, level 2 an amber glow, and level 3 a stronger red pulse/glow. Alerts now depend on context visibility and shut down immediately if that metric is hidden.
-- Replace per-field task-list toggles with calm Compact, Balanced, and Detailed information-density presets; context usage remains visible in every row.
-- Add a dedicated Behavior settings page so interaction and safeguards do not crowd layout, metric, or appearance controls.
-- Add human-localization guidance based on BCP 47 language tags and community-standard language names.
-
-## 2.0.2-preview - 2026-07-15
-
-- Wait for bounded session identity metadata before rendering a newly discovered task, refresh delayed official titles, recover workspace names from `session_meta.cwd`, and keep internal auto-review sessions from appearing transiently as duplicate user tasks.
-- Add four completion-departure levels for list rows and independent task bubbles: natural fade, gentle cue, focus exit and a bounded beacon. The existing completed-task retention setting still controls when the departure begins.
-- Adapt status-dot, automatic reminder, proactive CODEX-notice and completion-departure effects to light, dark, gradient and image-theme polarity so the selected intensity remains perceptually clear without exceeding animation limits.
-- Exclude developer-only `private/` material from installation and delivery packages.
-
-## 2.0.1-preview - 2026-07-15
-
-- Keep finished conversations visible for a configurable period, including silent completion records. The default is two minutes; settings offer immediate hiding through thirty minutes, and a new turn clears the completed state immediately.
-- Improve Windows text clarity on mixed-DPI displays by enabling Per-Monitor V2 DPI awareness, layout rounding, pixel snapping and display-oriented text formatting.
-- Remove persistent drop shadows from the always-on-top summary HUD and independent task bubbles to reduce visual interference with other applications.
-- Add synthetic regressions for multi-date active-session discovery, completed-task retention settings, high-DPI text rendering and shadow-free persistent surfaces.
-
-## Development work incorporated into 2.1.0
-
-- Stop replaying the whole-window fade for every Token refresh. Update animation is now keyed to task membership, display mode, and status-phase changes, uses a subtle 96%-to-100% fade, and yields to explicit attention effects.
-- Separate broad session discovery from the visible task set: keep scanning every creation-date folder so resumed work is never lost, but hide internal subagent sessions, silent/internal stops and user tasks whose completion hold has expired.
-- Give each row a two-level local identity, `project · Codex thread title`, using the same `session_index.jsonl` source as Codex Usage Tracker rather than deriving a label from prompt text. Index changes refresh live; hover mode reveals start time and project-only mode remains available.
-- Add a visually matched dismiss action to each list row and independent bubble. Dismissal affects only the HUD's in-memory visible set; it does not modify the Codex conversation or logs, and the task returns automatically when that conversation starts a new turn.
-- Remove state and any detached bubble when an actively monitored conversation file disappears; once the visible set is empty, show a stable no-active-task message rather than the first-use waiting copy.
-- Replace Windows PowerShell's unreliable JSONL `Get-Content -Tail` path with a bounded UTF-8 byte-tail reader so non-ASCII completion records and final records without a newline are not lost.
-- Add an off-by-default proactive Codex notice channel that is distinct from automatic lifecycle reminders. Every notice carries a visible CODEX identity, targets one task surface and can be sent mid-turn without manufacturing completion or stopping later work.
-- Let each new Codex task query notice permission and privacy-safe active task numbers instead of relying on cross-conversation memory. Text-only permission uses the configured style; expressive permission accepts bounded declarative combinations of glow, pulse, breathe and flow without evaluating model-supplied code.
-- Add separate Codex-notice glow presets, custom ARGB, intensity, duration and default motion. Theme packages may style this channel but cannot enable it, grant permission or change safety limits.
-- Fix concurrent discovery for reopened conversations: Codex session folders use the thread creation date, so active old threads are now selected across every date folder by recent write time. This prevents multiple tasks from replacing one list row and stops the surviving task from being repeatedly renumbered.
-- Add a read-only task-number registry containing only workspace leaf, coarse status and update time, plus isolated list/split routing tests for one targeted agent notice.
-- Keep first installation on basic-monitoring defaults and teach the installer/AI handoff to describe proactive notices, expressive choreography, themes, cost estimates and other DIY features only after installation, without silently enabling them.
-- Replace the application mark with a minimal HUD-frame, live-waveform and status-dot icon designed to remain recognizable at 16 px. Use a dedicated Windows AppUserModelID, native large/small HWND icons and build-specific shortcut icon paths so taskbar grouping and Explorer icon caching cannot fall back to the previous PowerShell/shortcut artwork.
-- Distinguish visible turn completion from silent/internal turn endings, delay completion attention for an eight-second continuation guard, and cancel it when the same task immediately starts another turn.
-- Route attention to only the active surface: the summary in summary mode, the matching row in list mode, or the matching detached bubble in split mode.
-- Reorganize return reminders around trigger, target and intensity, add concise bilingual explanations and polished contextual tooltips, and collapse advanced status-dot tuning by default.
-- Add a Theme Workshop with drag-and-drop installation for declarative `.json`, `.cmhud-theme` and `.cmhud-theme.zip` packages.
-- Expand themes beyond color presets to support solid, gradient and local-image surfaces, font families, opacity, spacing, list presentation, borders, shadows, status-dot sizing, reminder styling and selected layout behavior.
-- Keep installed user themes update-safe under `%LOCALAPPDATA%\CodexMonitorHUD\themes`; reject scripts, network resources, unsafe ZIP paths and oversized packages.
-- Add a reusable theme-authoring Skill plus an AI-oriented architecture, customization and cross-runtime adaptation guide for Windows, macOS, Linux and other agent runtimes.
-- Add opt-in API-equivalent cost estimates to the summary, list rows and independent bubbles. Use cumulative Codex tokens, separate cached-input pricing, a bundled local snapshot and an optional tracker-compatible JSON override; unknown models remain unpriced.
-- State clearly that cost is not a subscription bill or exact credits, and that shared ChatGPT Work/Codex allowance cannot be reconstructed because the HUD observes only local Codex sessions.
-- Keep pricing status privacy-safe by showing only “bundled snapshot” or a custom file name, never an absolute user path.
-
-## 2.0.0 - 2026-07-15
-
-- Rename the product to Codex Monitor HUD to make its purpose explicit: local, real-time monitoring for Codex tasks running in the background.
-- Use a new plugin, MCP server, Skill, runtime path, settings directory, mutex, shortcut and repository identity.
-- Treat v2 as a fresh installation. The installer detects the legacy `codex-token-strip` plugin and stops without importing or deleting legacy settings.
-- Reorganize the bilingual documentation around live task awareness, high-concurrency Pro workflows and the boundary between monitoring and retrospective analytics.
-
-## 1.4.2 - 2026-07-15
-
-- Split return-to-work reminders into two stackable channels: an independent status-dot reminder and a per-surface bubble/list reminder.
-- Let the status dot choose soft pulse, double-heartbeat or beacon rhythm; subtle, balanced or bright glow; slow, normal or fast timing; and an independently toggleable scale-breathing layer.
-- Replace the old mutually exclusive dot option with four surface styles spanning clear strength levels: soft halo, bubble breathing, moving pulse light flow and strong focus pulse.
-- Make pulse light flow animate the relevant summary shell, list task item or independent task bubble without repeatedly restarting during refresh.
-- Replace the generic Windows information/PowerShell icons with one blue-violet AI-knot and terminal-mark icon shared by the notification area, desktop shortcut, Start-menu shortcut and plugin branding.
-- Add bilingual reminder-settings screenshots and extend tests for stackable reminder configuration, animation paths and unified icon wiring.
-
-## 1.4.1 - 2026-07-15
-
-- Add Compact, Balanced and Relaxed task-list density levels, defaulting to the lighter Compact layout.
-- Keep the task counter and expand control visible after collapsing the list, including when only one task is active.
-- Separate per-task fields for list rows and independent task bubbles, while migrating legacy task-bubble field choices safely.
-- Let each independent task bubble be resized directly from a subtle lower-right handle, with bounded dimensions retained while that task remains active.
-- Show an explicit “current dragged position” selection instead of leaving the position control blank after manual placement.
-- Remove remaining system hover chrome from the rounded ComboBox controls and restyle the list toggle to match the HUD.
-
-## 1.4.0 - Unreleased
-
-- Add summary, expandable task-list and independent task-bubble display modes for concurrent Codex work.
-- Add stable in-memory task numbers, privacy-safe workspace labels, hover/always/hidden name behavior, delayed number reuse and bounded stale-number retention.
-- Support detaching or merging one task, splitting all visible tasks and merging all bubbles from both the HUD and the persistent notification-area menu.
-- Keep weekly allowance account-wide on the summary bubble while per-task rows and bubbles show their own status, model, call total, task total and update time.
-- Add a configurable split-bubble limit (6 by default, capped at 12) and retain the existing 64-active-file discovery ceiling.
-- Add compact-row, information-card and status-rail list styles.
-- Replace native square detach/merge controls with a quiet rounded glass button and crisp vector window-action icons shared by list and independent-bubble views.
-- Replace system ComboBox chrome with rounded glass selection controls, vector chevrons and a matching elevated option menu.
-- Add explicit completed and aborted states from local lifecycle events, plus configurable return-to-work reminders for completion, abort/error and natural settling.
-- Let the summary bubble, relevant list item and independent task bubble use different reminder styles; list and task-bubble reminders can animate the entire relevant surface.
-- Add uniform, layered-clarity and smart-focus transparency behaviors that preserve important numbers and status visibility.
-- Harden number allocation with a bounded O(1) reuse queue and validate 10,000 allocation/release cycles with 64 continuously visible tasks.
-- Ignore blank JSONL lines safely during concurrent file churn instead of allowing a dispatcher error to close split mode.
-- Refactor settings into General, Multi-task, Metrics and Appearance tabs with a concise explanation of multi-task behavior.
-- Reduce new-session discovery latency from three seconds to roughly 1.5 seconds while preserving incremental byte-tail reads.
-- Add isolated Windows runtime validation with 80 synthetic concurrent tasks and repeated task replacement in both list and split modes.
-- Reposition split bubbles intelligently around top, bottom, left, right and custom HUD placements.
-- Rewrite the English and Chinese README positioning for high-concurrency Codex workflows.
-- Clarify the README language-switch order and add a short, scope-aware recommendation for users who need Codex Usage Tracker's deeper retrospective analytics.
-
-## 1.3.1 - 2026-07-14
-
-- Add a permanent Windows notification-area icon with bilingual actions to open settings, disable mouse click-through and exit the HUD. The disable action stays available even when the HUD cannot receive pointer input.
-- Load notification-area Chinese labels from the UTF-8 locale file instead of embedding them in the Windows PowerShell script, preventing mojibake on PowerShell 5.1.
-
-## 1.3.0 - 2026-07-14
-
-- Add an opt-in mouse click-through mode that leaves HUD rendering and live updates active while pointer input reaches the application underneath.
-- Keep click-through disabled by default and provide recovery through the tray icon, settings window, installed settings shortcuts and the `monitor_hud_disable_click_through` MCP tool.
-- Consume complete JSONL records immediately even when the writer has not appended the final newline yet, fixing new tasks that remained on the waiting state until HUD restart.
-- Track account allowance timestamps independently from Token usage timestamps, so a newer weekly observation cannot remain hidden behind an older task snapshot.
-- Change font-size editing from whole-point jumps to 0.1-point live increments.
-- Add default, intuitive-semantics, color-vision-friendly and low-distraction status color schemes while retaining individual ARGB customization.
-
-## 1.2.1 - 2026-07-13
-
-- Keep bubble layout, number format and selected metrics unchanged when applying a visual preset.
-- Expand bubble layouts from three to six with compact, outlined and metric-card variants.
-- Add optional latest-observed weekly remaining allowance from local rate-limit snapshots.
-- Keep 5-hour parsing dormant in the core for compatibility, without exposing it in settings or HUD metrics while Codex does not publish that window.
-- Preserve account-wide allowance semantics in concurrent-task mode by selecting the newest observation instead of summing or averaging it.
-
-## 1.2.0 - 2026-07-13
-
-- Keep the language selector and HUD context menu bilingual in every language mode.
-- Add an HSV color wheel while preserving direct ARGB entry.
-- Add ten data-driven themes and documented UI extension points.
-- Add configurable colors and timing for active, listening, idle, paused, and read-error states.
-- Make appearance sliders independent, non-snapping, and throttled during live preview.
-- Add desktop and Start menu settings shortcuts without enabling login startup.
-
-## 1.1.0 - 2026-07-13
-
-- Localized the complete settings interface in Simplified Chinese and English.
-- Kept symbol-only HUD mode paired with readable English settings.
-- Added independent incremental monitoring for concurrent Codex tasks.
-- Added latest-activity and active-task aggregate monitoring modes.
-- Added configurable active-task windows and an optional active-task count metric.
-- Added deterministic in-place upgrade signaling before file replacement.
-- Added a Windows `Start-Process` launcher plus multi-host heartbeats so closing one concurrent task does not stop the HUD while other tasks remain active.
-
-## 1.0.0 - 2026-07-13
-
-- Initial public-ready release.
-- Live cached input, fresh input, output and total accounting.
-- Five appearance presets and three layouts.
-- Simplified Chinese, English and symbol-only labels.
-- Configurable fields, colors, typography, position and animation.
-- Codex MCP lifecycle host with local control tools.
-- Local-only privacy model and no login startup.
+The Codex Monitor HUD changelog (1.0.0 – 3.3.0) is in this repository's history: see
+[`CHANGELOG.md` at v3.3.0](https://github.com/LH-03/agent-monitor-hud/blob/v3.3.0/CHANGELOG.md).

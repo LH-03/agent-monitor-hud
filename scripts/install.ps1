@@ -1,305 +1,196 @@
+# Installs or upgrades Agent Monitor HUD 4.x (formerly Codex Monitor HUD) for
+# the current user. No administrator rights are needed.
+#
+# Works from an extracted release ZIP (bin\AgentMonitorHUD.exe next to the
+# plugin files) or from a source checkout after `cargo build --release`.
+#
+#   fresh install   ~/plugins/codex-monitor-hud is created
+#   from 3.x        the old plugin folder is kept whole as
+#                   ~/plugins/.codex-monitor-hud-rollback-<version>, together with
+#                   _native-install-backup (old shortcuts, Claude config copies);
+#                   scripts\rollback.ps1 restores it
+#   from 4.x        upgraded in place
+#
+# Settings in %LOCALAPPDATA%\CodexMonitorHUD are shared by every version and
+# never touched here.
 param(
-    [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-    [ValidateSet('zh-CN','en')][string]$DefaultLanguage = 'en',
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$RollbackVersion,
-    [string]$PerformanceMetricsRoot,
-    [switch]$UseBundledRuntime,
-    [switch]$SkipLaunch,
-    [switch]$SkipShortcuts
+    # Path to AgentMonitorHUD.exe; found automatically when omitted.
+    [string]$Exe,
+    # Do not start the HUD after installing.
+    [switch]$NoStart,
+    # Skip the Claude Code hooks / MCP registration even if Claude Code is present.
+    [switch]$NoClaude
 )
-
 $ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
 $pluginName = 'codex-monitor-hud'
-$pluginsRoot = Join-Path $HOME 'plugins'
-$targetRoot = Join-Path $pluginsRoot $pluginName
-$legacyPluginRoot = Join-Path $pluginsRoot 'codex-token-strip'
+
+# Release ZIP: the plugin files sit next to scripts\. Source checkout: package\.
+$releaseLayout = Test-Path (Join-Path $root '.codex-plugin\plugin.json')
+$packageDir = if ($releaseLayout) { $root } else { Join-Path $root 'package' }
+if (-not $Exe) {
+    $candidates = @(
+        (Join-Path $root 'bin\AgentMonitorHUD.exe'),
+        (Join-Path $root 'target\release\AgentMonitorHUD.exe'),
+        (Join-Path $root '..\.native-build\release\AgentMonitorHUD.exe')
+    )
+    $Exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $Exe) { throw 'AgentMonitorHUD.exe not found. Run `cargo build --release` first, or pass -Exe.' }
+}
+$Exe = (Resolve-Path $Exe).Path
+$newVersion = [string](Get-Content -Raw -Encoding UTF8 (Join-Path $packageDir '.codex-plugin\plugin.json') | ConvertFrom-Json).version
+
+$plugins = Join-Path $HOME 'plugins'
+$plugin = Join-Path $plugins $pluginName
+$cacheRoot = Join-Path $HOME ".codex\plugins\cache\local\$pluginName"
 $marketplacePath = Join-Path $HOME '.agents\plugins\marketplace.json'
-$stateRoot = Join-Path $env:LOCALAPPDATA 'CodexMonitorHUD'
-$settingsPath = Join-Path $stateRoot 'settings.json'
-$encoding = New-Object Text.UTF8Encoding($false)
+# CODEX_MONITOR_HUD_INSTALL_SANDBOX keeps shortcuts under $HOME (install tests).
+$sandbox = [bool]$env:CODEX_MONITOR_HUD_INSTALL_SANDBOX
+$desktopDir = if ($sandbox) { Join-Path $HOME 'Desktop' } else { [Environment]::GetFolderPath('Desktop') }
+$programsDir = if ($sandbox) { Join-Path $HOME 'Programs' } else { [Environment]::GetFolderPath('Programs') }
+# 3.x shortcut names (backed up on migration, replaced by the new names).
+$desktopLnk = Join-Path $desktopDir 'Codex Monitor HUD Settings.lnk'
+$startFolder = Join-Path $programsDir 'Codex Monitor HUD'
+$startLnk = Join-Path $startFolder 'Open Monitor HUD Settings.lnk'
+$newDesktopLnk = Join-Path $desktopDir 'Agent Monitor HUD Settings.lnk'
+$newStartFolder = Join-Path $programsDir 'Agent Monitor HUD'
+$newStartLnk = Join-Path $newStartFolder 'Agent Monitor HUD Settings.lnk'
+$utf8 = New-Object Text.UTF8Encoding $false
 
-function Get-PluginVersion {
-    param([string]$Root)
-    $manifestPath = Join-Path $Root '.codex-plugin\plugin.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { return 'unknown' }
-    try {
-        $version = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json).version
-        return $(if ($version -match '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { $version } else { 'unknown' })
-    }
-    catch { return 'unknown' }
+function Get-PluginVersion([string]$dir) {
+    $manifest = Join-Path $dir '.codex-plugin\plugin.json'
+    if (-not (Test-Path $manifest)) { return $null }
+    return [string](Get-Content -Raw -Encoding UTF8 $manifest | ConvertFrom-Json).version
 }
 
-function Stop-InstalledHud {
-    if (-not (Test-Path -LiteralPath $stateRoot)) { return }
-    [IO.File]::WriteAllText((Join-Path $stateRoot 'manual-exit.signal'), [DateTime]::UtcNow.ToString('O'), $encoding)
-    [IO.File]::WriteAllText((Join-Path $stateRoot 'exit.signal'), [DateTime]::UtcNow.ToString('O'), $encoding)
-    $heartbeatPath = Join-Path $stateRoot 'hud.heartbeat'
-    for ($attempt = 0; $attempt -lt 30 -and (Test-Path -LiteralPath $heartbeatPath); $attempt++) {
-        Start-Sleep -Milliseconds 200
-    }
+function Stop-Hud {
+    if ($sandbox) { return }
+    # Stop installed HUD modes before replacing their executable. Development
+    # binaries and unrelated processes with the same filename are left alone.
+    Get-Process CodexMonitorHUD, AgentMonitorHUD -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and ($_.Path.StartsWith($plugin + '\', [StringComparison]::OrdinalIgnoreCase) -or $_.Path.StartsWith($cacheRoot + '\', [StringComparison]::OrdinalIgnoreCase))
+    } |
+        ForEach-Object { $_.CloseMainWindow() | Out-Null; if (-not $_.WaitForExit(1500)) { $_ | Stop-Process -Force } }
+    Get-CimInstance Win32_Process -Filter "Name='dotnet.exe' OR Name='CodexMonitorHud.exe'" |
+        Where-Object { $_.CommandLine -match 'CodexMonitorHud\.dll|codex-monitor-hud\\runtime' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
-function Clear-HudStopSignals {
-    # Stop-InstalledHud intentionally writes both signals. A replacement host
-    # must never inherit either one or it can exit immediately after launch.
-    foreach ($signalName in @('manual-exit.signal','exit.signal')) {
-        Remove-Item -LiteralPath (Join-Path $stateRoot $signalName) -Force -ErrorAction SilentlyContinue
-    }
+function Write-Shortcut([string]$path, [string]$target) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($path)
+    $link.TargetPath = $target
+    $link.Arguments = '--open-settings'
+    $link.WorkingDirectory = Split-Path -Parent $target
+    $link.IconLocation = "$target,0"
+    $link.Description = 'Agent Monitor HUD settings'
+    $link.Save()
 }
 
-function Copy-PluginTree {
-    param([string]$From, [string]$To)
-    New-Item -ItemType Directory -Force -Path $To | Out-Null
-    $excludedRootNames = @('.git','.agents','.codex','artifacts','.test-output','private','node_modules','sessions','logs','archive','Microsoft','AGENTS.md','WORKSPACE_STATE.md')
-    $excludedRelativePaths = @('docs/MAINTENANCE_WORKFLOW.md','docs/MACOS_PREVIEW_TESTING.md','scripts/prepare-delivery.ps1')
-    foreach ($item in Get-ChildItem -Force -LiteralPath $From | Where-Object { $_.Name -notin $excludedRootNames -and $_.Name -notlike '.test-output*' }) {
-        Copy-Item -LiteralPath $item.FullName -Destination $To -Recurse -Force
-    }
-    foreach ($relativePath in $excludedRelativePaths) {
-        Remove-Item -LiteralPath (Join-Path $To $relativePath) -Force -ErrorAction SilentlyContinue
-    }
-    foreach ($buildDirectory in Get-ChildItem -LiteralPath $To -Recurse -Directory -Force | Where-Object { $_.Name -in @('bin','obj') } | Sort-Object { $_.FullName.Length } -Descending) {
-        Remove-Item -LiteralPath $buildDirectory.FullName -Recurse -Force
-    }
-    foreach ($unsafeFile in Get-ChildItem -LiteralPath $To -Recurse -File -Force | Where-Object {
-        $_.Name -in @('.DS_Store','Thumbs.db','settings.json') -or
-        $_.Name -like '.env*' -or
-        $_.Name -like '*.user.json' -or
-        $_.Extension.ToLowerInvariant() -in @('.log','.zip','.db','.sqlite','.sqlite3','.jsonl')
-    }) {
-        Remove-Item -LiteralPath $unsafeFile.FullName -Force
-    }
-}
-
-function Switch-InstalledTree {
-    param([string]$StageRoot)
-    Stop-InstalledHud
-    $oldLocation = $null
-    $temporaryOld = $null
-    if (Test-Path -LiteralPath $targetRoot) {
-        $installedVersion = Get-PluginVersion $targetRoot
-        $rollbackRoot = Join-Path $pluginsRoot ('.codex-monitor-hud-rollback-' + $installedVersion)
-        if (Test-Path -LiteralPath $rollbackRoot) {
-            $temporaryOld = Join-Path $pluginsRoot ('.codex-monitor-hud-replaced-' + [Guid]::NewGuid().ToString('N'))
-            Move-Item -LiteralPath $targetRoot -Destination $temporaryOld
-            $oldLocation = $temporaryOld
-        } else {
-            Move-Item -LiteralPath $targetRoot -Destination $rollbackRoot
-            $oldLocation = $rollbackRoot
-        }
-    }
-    try {
-        Move-Item -LiteralPath $StageRoot -Destination $targetRoot
-    } catch {
-        if ($null -ne $oldLocation -and -not (Test-Path -LiteralPath $targetRoot) -and (Test-Path -LiteralPath $oldLocation)) {
-            Move-Item -LiteralPath $oldLocation -Destination $targetRoot
-        }
-        throw
-    }
-    return [pscustomobject]@{
-        PreviousRoot = $oldLocation
-        TemporaryPrevious = $temporaryOld
-    }
-}
-
-function Complete-InstalledTreeSwitch {
-    param($Transaction)
-    if ($null -ne $Transaction -and
-        $null -ne $Transaction.TemporaryPrevious -and
-        (Test-Path -LiteralPath $Transaction.TemporaryPrevious)) {
-        Remove-Item -LiteralPath $Transaction.TemporaryPrevious -Recurse -Force
-    }
-}
-
-function Undo-InstalledTreeSwitch {
-    param($Transaction)
-    if ($null -eq $Transaction) { return }
-    Stop-InstalledHud
-    $failedRoot = $null
-    if (Test-Path -LiteralPath $targetRoot) {
-        $failedRoot = Join-Path $pluginsRoot ('.codex-monitor-hud-failed-' + [Guid]::NewGuid().ToString('N'))
-        Move-Item -LiteralPath $targetRoot -Destination $failedRoot
-    }
-    try {
-        if ($null -ne $Transaction.PreviousRoot -and (Test-Path -LiteralPath $Transaction.PreviousRoot)) {
-            Move-Item -LiteralPath $Transaction.PreviousRoot -Destination $targetRoot
-        }
-    } catch {
-        if ($null -ne $failedRoot -and
-            (Test-Path -LiteralPath $failedRoot) -and
-            -not (Test-Path -LiteralPath $targetRoot)) {
-            Move-Item -LiteralPath $failedRoot -Destination $targetRoot
-            $failedRoot = $null
-        }
-        throw
-    } finally {
-        if ($null -ne $failedRoot -and (Test-Path -LiteralPath $failedRoot)) {
-            Remove-Item -LiteralPath $failedRoot -Recurse -Force
-        }
-    }
-}
-
-function Update-PersonalMarketplace {
+function Update-Marketplace {
+    # Same personal-marketplace entry 3.x used, so `codex plugin add
+    # codex-monitor-hud@local` keeps working. Unrelated entries are kept.
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $marketplacePath) | Out-Null
-    if (Test-Path -LiteralPath $marketplacePath) {
-        $marketplace = Get-Content -Raw -Encoding UTF8 -LiteralPath $marketplacePath | ConvertFrom-Json
+    if (Test-Path $marketplacePath) {
+        $marketplace = Get-Content -Raw -Encoding UTF8 $marketplacePath | ConvertFrom-Json
     } else {
-        $marketplace = [pscustomobject]@{ name='personal'; interface=[pscustomobject]@{displayName='Personal'}; plugins=@() }
+        $marketplace = [pscustomobject]@{ name = 'personal'; interface = [pscustomobject]@{ displayName = 'Personal' }; plugins = @() }
     }
     $entry = [pscustomobject]@{
         name = $pluginName
-        source = [pscustomobject]@{ source='local'; path='./plugins/' + $pluginName }
-        policy = [pscustomobject]@{ installation='AVAILABLE'; authentication='ON_INSTALL' }
+        source = [pscustomobject]@{ source = 'local'; path = "./plugins/$pluginName" }
+        policy = [pscustomobject]@{ installation = 'AVAILABLE'; authentication = 'ON_INSTALL' }
         category = 'Productivity'
     }
     $marketplace.plugins = @(@($marketplace.plugins | Where-Object { $_.name -ne $pluginName }) + $entry)
-    $temporary = $marketplacePath + '.tmp.' + [Guid]::NewGuid().ToString('N')
-    try {
-        [IO.File]::WriteAllText($temporary, ($marketplace | ConvertTo-Json -Depth 8), $encoding)
-        Move-Item -LiteralPath $temporary -Destination $marketplacePath -Force
-    } finally {
-        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    $temporary = "$marketplacePath.tmp"
+    [IO.File]::WriteAllText($temporary, ($marketplace | ConvertTo-Json -Depth 8), $utf8)
+    Move-Item $temporary $marketplacePath -Force
+}
+
+$current = Get-PluginVersion $plugin
+$migration = $current -and $current.StartsWith('3.')
+if ($current -and -not $migration -and -not $current.StartsWith('4.')) {
+    throw "Unexpected installed plugin version '$current' at $plugin; nothing was changed."
+}
+if ((Test-Path $plugin) -and -not $current) {
+    throw "$plugin exists but has no plugin manifest; move it aside first. Nothing was changed."
+}
+$rollback = if ($migration) { Join-Path $plugins ".codex-monitor-hud-rollback-$current" } else { $null }
+if ($migration -and (Test-Path $rollback)) {
+    throw "A rollback copy already exists at $rollback while $current is installed; resolve it manually first. Nothing was changed."
+}
+
+$mode = if ($migration) { "migration from $current" } elseif ($current) { "upgrade from $current" } else { 'fresh install' }
+Write-Output "Agent Monitor HUD $newVersion ($mode)"
+Stop-Hud
+
+if ($migration) {
+    # Move first: the backup folder lives inside the rollback copy.
+    Move-Item $plugin $rollback
+    $backup = Join-Path $rollback '_native-install-backup'
+    $shortcuts = Join-Path $backup 'shortcuts'
+    $claude = Join-Path $backup 'claude'
+    New-Item -ItemType Directory -Force -Path $shortcuts, $claude | Out-Null
+    if (Test-Path $desktopLnk) { Copy-Item $desktopLnk (Join-Path $shortcuts 'desktop.lnk') }
+    if (Test-Path $startLnk) { Copy-Item $startLnk (Join-Path $shortcuts 'startmenu.lnk') }
+    foreach ($f in @((Join-Path $HOME '.claude\settings.json'), (Join-Path $HOME '.claude.json'))) {
+        if (Test-Path $f) { Copy-Item $f (Join-Path $claude (Split-Path -Leaf $f)) }
+    }
+    Copy-Item (Join-Path $PSScriptRoot 'rollback.ps1') (Join-Path $backup "rollback-to-$current.ps1")
+    Write-Output "Previous $current kept at $rollback"
+}
+
+# Lay out the plugin in a staging folder, then switch.
+$stage = Join-Path $plugins '.codex-monitor-hud-staging'
+if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+robocopy $packageDir $stage /E /XD bin scripts .git target /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -gt 7) { throw 'Could not stage the plugin files; installation stopped.' }
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'bin'), (Join-Path $stage 'scripts') | Out-Null
+Copy-Item $Exe (Join-Path $stage 'bin\AgentMonitorHUD.exe')
+foreach ($script in 'install.ps1', 'rollback.ps1', 'uninstall.ps1') {
+    Copy-Item (Join-Path $PSScriptRoot $script) (Join-Path $stage "scripts\$script")
+}
+$exeInstalled = Join-Path $plugin 'bin\AgentMonitorHUD.exe'
+$mcp = [ordered]@{ mcpServers = [ordered]@{ 'agent-monitor-hud' = [ordered]@{ command = $exeInstalled; args = @('mcp') } } }
+[IO.File]::WriteAllText((Join-Path $stage '.mcp.json'), ($mcp | ConvertTo-Json -Depth 5), $utf8)
+if ($migration) { [IO.File]::WriteAllText((Join-Path $stage '.rollback-version'), $current, $utf8) }
+elseif (Test-Path (Join-Path $plugin '.rollback-version')) { Copy-Item (Join-Path $plugin '.rollback-version') $stage }
+if (Test-Path $plugin) { Remove-Item -Recurse -Force $plugin }
+Move-Item $stage $plugin
+
+# Codex runs plugins from its cache: refresh every cached version folder (old
+# Node MCP servers keep running from memory until their Codex session ends; the
+# native HUD keeps the legacy heartbeat fresh so they never relaunch 3.x).
+if ((Test-Path $cacheRoot) -or (Test-Path (Join-Path $HOME '.codex'))) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $cacheRoot $newVersion) | Out-Null
+    foreach ($dir in Get-ChildItem $cacheRoot -Directory) {
+        robocopy $plugin $dir.FullName /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+        if ($LASTEXITCODE -gt 7) { throw 'Could not update the Codex plugin cache.' }
     }
 }
+Update-Marketplace
 
-function Assert-MarketplaceReadable {
-    if (-not (Test-Path -LiteralPath $marketplacePath)) { return }
-    try { $null = Get-Content -Raw -Encoding UTF8 -LiteralPath $marketplacePath | ConvertFrom-Json }
-    catch { throw "Personal marketplace JSON is invalid; installation was not switched: $marketplacePath" }
+# Settings shortcuts open the native exe (3.x originals are in the backup).
+foreach ($old in @($desktopLnk, $startLnk)) { Remove-Item $old -ErrorAction SilentlyContinue }
+if ((Test-Path $startFolder) -and -not (Get-ChildItem $startFolder -Force)) { Remove-Item $startFolder }
+Write-Shortcut $newDesktopLnk $exeInstalled
+Write-Shortcut $newStartLnk $exeInstalled
+
+# Claude Code: lifecycle hooks + MCP server (only the HUD's own entries), and
+# only when Claude Code is present on this machine.
+$hasClaude = (Test-Path (Join-Path $HOME '.claude')) -or (Test-Path (Join-Path $HOME '.claude.json'))
+if ($hasClaude -and -not $NoClaude) {
+    & $exeInstalled integrate claude | Out-Null
+    Write-Output "Claude Code integration: $(if ($LASTEXITCODE -eq 0) { 'ok' } else { 'FAILED (see %LOCALAPPDATA%\CodexMonitorHUD\hud.log)' })"
+} else {
+    Write-Output 'Claude Code integration: skipped'
 }
 
-function Get-MarketplaceSnapshot {
-    if (Test-Path -LiteralPath $marketplacePath) {
-        return [pscustomobject]@{ Exists=$true; Bytes=[IO.File]::ReadAllBytes($marketplacePath) }
-    }
-    return [pscustomobject]@{ Exists=$false; Bytes=$null }
+if (-not $NoStart) {
+    Remove-Item (Join-Path $env:LOCALAPPDATA 'CodexMonitorHUD\manual-exit.signal') -ErrorAction SilentlyContinue
+    Start-Process $exeInstalled
 }
-
-function Restore-MarketplaceSnapshot {
-    param($Snapshot)
-    if ($null -eq $Snapshot) { return }
-    if ($Snapshot.Exists) {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $marketplacePath) | Out-Null
-        [IO.File]::WriteAllBytes($marketplacePath, [byte[]]$Snapshot.Bytes)
-    } else {
-        Remove-Item -LiteralPath $marketplacePath -Force -ErrorAction SilentlyContinue
-    }
-}
-
-New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
-
-if (-not [string]::IsNullOrWhiteSpace($RollbackVersion)) {
-    $rollbackRoot = Join-Path $pluginsRoot ('.codex-monitor-hud-rollback-' + $RollbackVersion)
-    if (-not (Test-Path -LiteralPath $rollbackRoot)) { throw "No local rollback copy exists for $RollbackVersion at $rollbackRoot." }
-    if ((Get-PluginVersion $rollbackRoot) -ne $RollbackVersion) { throw 'Rollback copy manifest does not match the requested version.' }
-    foreach ($required in @('.codex-plugin\plugin.json','config.default.json','scripts\start.ps1','src\CodexMonitorHUD.ps1')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $rollbackRoot $required))) { throw "Rollback copy is incomplete: $required" }
-    }
-    $rollbackStage = Join-Path $pluginsRoot ('.codex-monitor-hud-stage-' + [Guid]::NewGuid().ToString('N'))
-    $rollbackTransaction = $null
-    $rollbackMarketplaceSnapshot = Get-MarketplaceSnapshot
-    try {
-        Copy-PluginTree $rollbackRoot $rollbackStage
-        Assert-MarketplaceReadable
-        $rollbackTransaction = Switch-InstalledTree $rollbackStage
-        try {
-            Update-PersonalMarketplace
-            if (-not $SkipShortcuts) {
-                & (Join-Path $targetRoot 'scripts\create-shortcuts.ps1') -TargetRoot $targetRoot
-            }
-            Clear-HudStopSignals
-            & (Join-Path $targetRoot 'scripts\start.ps1') -Settings
-            Complete-InstalledTreeSwitch $rollbackTransaction
-        } catch {
-            try { Undo-InstalledTreeSwitch $rollbackTransaction }
-            finally { Restore-MarketplaceSnapshot $rollbackMarketplaceSnapshot }
-            throw
-        }
-        Write-Output "Rolled back: $targetRoot -> $RollbackVersion"
-    } finally {
-        if (Test-Path -LiteralPath $rollbackStage) { Remove-Item -LiteralPath $rollbackStage -Recurse -Force }
-    }
-    return
-}
-
-if (Test-Path -LiteralPath $legacyPluginRoot) {
-    throw "Legacy Codex Token HUD plugin detected at $legacyPluginRoot. Uninstall that separate v1 identity first; no files were changed."
-}
-
-$compiledApp = Join-Path $SourceRoot 'runtime\win-x64\app\CodexMonitorHud.dll'
-$buildScript = Join-Path $SourceRoot 'scripts\build-dotnet.ps1'
-$privateSdk = Join-Path $SourceRoot 'private\toolchain\dotnet\dotnet.exe'
-$systemSdk = Get-Command dotnet -ErrorAction SilentlyContinue
-if (-not $UseBundledRuntime -and (Test-Path -LiteralPath $buildScript) -and ((Test-Path -LiteralPath $privateSdk) -or $null -ne $systemSdk)) {
-    # A staged runtime may belong to an earlier source edit. Developer installs
-    # always rebuild when an SDK is available; installed copies can still be
-    # repaired or rolled back without requiring a global SDK.
-    & $buildScript -Configuration Release
-} elseif (-not (Test-Path -LiteralPath $compiledApp)) {
-    throw 'The compiled v3.3.0 runtime is missing and no .NET 10 SDK is available to build it.'
-}
-
-$stageRoot = Join-Path $pluginsRoot ('.codex-monitor-hud-stage-' + [Guid]::NewGuid().ToString('N'))
-$validationRoot = Join-Path $env:TEMP ('codex-monitor-hud-install-gate-' + [Guid]::NewGuid().ToString('N'))
-$healthPath = Join-Path $validationRoot 'health.json'
-$installTransaction = $null
-$settingsCreated = $false
-$marketplaceSnapshot = Get-MarketplaceSnapshot
-try {
-    Copy-PluginTree $SourceRoot $stageRoot
-    $stageDotnet = Join-Path $stageRoot 'runtime\win-x64\dotnet\dotnet.exe'
-    $stageApp = Join-Path $stageRoot 'runtime\win-x64\app\CodexMonitorHud.dll'
-    & $stageDotnet $stageApp --plugin-root $stageRoot --health-check $healthPath
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $healthPath)) { throw 'Staged install health check failed.' }
-    $health = Get-Content -Raw -Encoding UTF8 -LiteralPath $healthPath | ConvertFrom-Json
-    if ([string]$health.version -ne '3.3.0' -or [string]$health.config -ne 'ok' -or [string]$health.xaml -ne 'ok' -or [string]$health.parser -ne 'ok') {
-        throw ('Staged install health check returned an invalid result: ' + ($health | ConvertTo-Json -Compress))
-    }
-    # Full static tests are a source-tree/release gate.  A user install only
-    # needs the staged runtime health check above before the atomic switch.
-    Assert-MarketplaceReadable
-    $installTransaction = Switch-InstalledTree $stageRoot
-    try {
-        Update-PersonalMarketplace
-        if (-not (Test-Path -LiteralPath $settingsPath)) {
-            New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
-            $initialSettings = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $targetRoot 'config.default.json') | ConvertFrom-Json
-            $initialSettings.language = $DefaultLanguage
-            $settingsTemporary = $settingsPath + '.tmp.' + [Guid]::NewGuid().ToString('N')
-            try {
-                [IO.File]::WriteAllText($settingsTemporary, ($initialSettings | ConvertTo-Json -Depth 12), $encoding)
-                Move-Item -LiteralPath $settingsTemporary -Destination $settingsPath
-                $settingsCreated = $true
-            } finally {
-                Remove-Item -LiteralPath $settingsTemporary -Force -ErrorAction SilentlyContinue
-            }
-        }
-        if (-not $SkipShortcuts) {
-            & (Join-Path $targetRoot 'scripts\create-shortcuts.ps1') -TargetRoot $targetRoot
-        }
-        Clear-HudStopSignals
-        if (-not $SkipLaunch) {
-            & (Join-Path $targetRoot 'scripts\start.ps1') -Settings
-        }
-        Complete-InstalledTreeSwitch $installTransaction
-    } catch {
-        if ($settingsCreated) { Remove-Item -LiteralPath $settingsPath -Force -ErrorAction SilentlyContinue }
-        try { Undo-InstalledTreeSwitch $installTransaction }
-        finally { Restore-MarketplaceSnapshot $marketplaceSnapshot }
-        if (Test-Path -LiteralPath (Join-Path $targetRoot 'scripts\create-shortcuts.ps1')) {
-            try { & (Join-Path $targetRoot 'scripts\create-shortcuts.ps1') -TargetRoot $targetRoot } catch { }
-        }
-        throw
-    }
-} finally {
-    if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
-    if (Test-Path -LiteralPath $validationRoot) { Remove-Item -LiteralPath $validationRoot -Recurse -Force }
-}
-
-Write-Output "Installed transactionally: $targetRoot"
-Write-Output "Marketplace: $marketplacePath"
-Write-Output "Rollback command: scripts\install.ps1 -RollbackVersion <version>"
-Write-Output "First-install language: $DefaultLanguage (existing settings are preserved)"
-Write-Output 'Windows login startup is disabled. The Codex plugin MCP host starts the HUD when Codex loads the plugin.'
-Write-Output 'Restart Codex or start a new task after enabling the plugin.'
-Write-Output 'Basic monitoring is ready. Optional features remain user-controlled: proactive Codex notices and expressive choreography, Theme Workshop, API-equivalent cost, split bubbles, advanced transparency, and click-through.'
+Write-Output "Installed Agent Monitor HUD $newVersion at $plugin"

@@ -1,96 +1,134 @@
-# Codex Monitor HUD
+# Agent Monitor HUD
 
-> [English](README.md) · 仅支持 Windows x64
+> [English](README.md) · Windows x64 · 原名 **Codex Monitor HUD**
 
-Codex Monitor HUD 是一个完全本地运行的 Windows 实时悬浮监控器：展示当前活跃的 Codex Desktop、VS Code 中的 Codex、普通 Codex CLI（通常是 OpenAI/GPT），以及可选的独立 DeepSeek CLI Profile。它不是聊天记录库、账单工具，也不是云端服务。
+一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex**、**Claude Code**、
+**DeepSeek Harness**——包括 Token 用量、上下文、任务状态，以及套餐还剩多少，全部在本地读取。
 
-## 一句话让 Codex 安装
+![主气泡：活动节奏 + 额度分组](docs/images/hud-rhythm-dark.png)
 
-把本仓库链接交给 Codex，再说一句：**“帮我安装。”**
+> **4.0 是一次彻底重写。** 3.x 的 C#/WPF 程序（外加打包的 .NET 运行时和 Node.js MCP 宿主）由
+> **Claude Opus 5.5**（Anthropic）在 Claude Code 中用 Rust 从零重写为单个原生可执行文件。外观、
+> 设置和插件 ID 都保持不变。
 
-仓库内的 [INSTALL_WITH_CODEX.md](INSTALL_WITH_CODEX.md) 与 [install-manifest.json](install-manifest.json) 已写好确定性流程。合格的安装代理会识别 Windows x64、优先选择已校验的 Release、保留你的设置、完成健康检查并保留回滚副本；安装时不需要读取对话正文。
+HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，不再打包 .NET 运行时、Node.js
+宿主或 WebView。实现方式见[架构说明](docs/ARCHITECTURE.md)。
 
-手动安装：
+## 监控范围
+
+| Agent | 客户端 | 套餐 / 余额 |
+| --- | --- | --- |
+| **Codex** | 桌面端、VS Code、CLI、可选的独立 DeepSeek CLI Profile | 5 小时与周额度 |
+| **Claude Code** | 桌面版 Code 标签页、CLI | 5 小时与周用量（读取 Claude 桌面版的本地记录） |
+| **DeepSeek Harness** | 桌面版 | API 余额（可选，需要你自己的 API Key） |
+
+每个任务前都有来源角标，Claude CLI 的任务不会被看成 Codex 桌面端的任务。
+
+## 你会看到什么
+
+**主气泡**——开头放什么可以自选：
+
+- **指标**：缓存 / 未缓存输入、输出、本次合计、费用估算。
+- **节奏**：最近 15/30/60 分钟每分钟 Token 的走势小图，以及今日累计和估算费用。
+- **无**：只显示状态和额度。
+
+后面是紧凑的任务状态（`2 任务 · 1 运行 · 1 等待`）和额度分组：每个 Agent、每个窗口一根小进度条，
+快用完时依次变成琥珀色和红色。有任务在等你回复或确认时，最前面会亮起**等待提示**。
+
+![等待提示](docs/images/hud-waiting.png)
+
+**任务列表**——展开后是编号稳定的任务行，显示模型、上下文占用、缓存命中率和生命周期状态。
+任务可以拆成独立气泡、在 Codex 中打开，或从当前视图移除。
+
+![任务列表](docs/images/hud-list-dark.png)
+
+**主动通知**——经你同意后，Agent 可以通过自带的 MCP 工具，在自己的任务上贴一条带来源标记的
+简短提示，同时继续在后台工作。
+
+**拖动气泡右下角**可以放松间距。字号不会变，主气泡始终保持一条；双击角标恢复紧凑。
+
+## 设置
+
+六个页面：通用、外观（10 套主题、字号、透明度、颜色）、主气泡、任务、提醒、Agent。改动实时预览。
+
+![设置——主气泡](docs/images/settings-main.png)
+
+![设置——Agent](docs/images/settings-agents.png)
+
+### DeepSeek 余额（可选）
+
+设置 → **Agent** → *DeepSeek API Key*：粘贴你的 Key 后点**保存**。Key 用 Windows DPAPI 按当前用户
+加密，不写进 `settings.json`，之后只显示末四位，并且只发送给 `api.deepseek.com/user/balance`。
+点**移除**即可删除。
+
+## 安装
+
+1. 从[最新 Release](https://github.com/LH-03/agent-monitor-hud/releases/latest) 下载
+   `AgentMonitorHUD-windows-x64.zip` 和 `SHA256SUMS.txt`。
+2. 核对哈希并解压：
+
+   ```powershell
+   (Get-FileHash .\AgentMonitorHUD-windows-x64.zip -Algorithm SHA256).Hash
+   Expand-Archive .\AgentMonitorHUD-windows-x64.zip -DestinationPath .\AgentMonitorHUD
+   ```
+
+3. 运行安装脚本（不需要管理员权限）：
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\AgentMonitorHUD\scripts\install.ps1
+   ```
+
+安装位置是 `~/plugins/codex-monitor-hud`。脚本会在桌面和开始菜单创建 *Agent Monitor HUD Settings*
+快捷方式，为 Codex 注册插件；如果装了 Claude Code，还会为它加上 HUD 的生命周期 hooks 和 MCP 服务
+（加 `-NoClaude` 可跳过）。
+
+也可以把仓库地址交给 Codex 或 Claude Code，说一句**“帮我安装”**；Agent 的安装流程见
+[INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md)。
+
+**从 3.x 升级**是自动的：设置会保留，整个 3.x 插件目录会完整保存为
+`~/plugins/.codex-monitor-hud-rollback-<版本>`。想回退：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -DefaultLanguage zh-CN
+powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-hud\scripts\rollback.ps1
 ```
 
-Windows Release 会随包携带一套私有 .NET/WPF 运行时，因此无需用户预先安装匹配的系统级 .NET；下载体积的大部分来自这套运行时，而不是 HUD 本体。
+**卸载**（默认保留设置，加 `-RemoveSettings` 一并删除）：
 
-## 显示什么
-
-- 活跃、监听、空闲、暂停、读取错误、已完成和已中止状态。
-- 缓存/未缓存输入、输出、推理输出、本次合计、任务累计、上下文占用、模型和活跃任务数。
-- 账号级周额度与 5 小时额度窗口：从已登录的官方本地 Codex 接口读取。
-- 稳定任务编号、工作区标签，以及来自 `session_index.jsonl` 的本地官方对话标题。
-- 每个任务编号前都有来源徽标，让桌面端、VS Code、OpenAI CLI 与 DeepSeek CLI 不会混在一起。
-- 缓存命中率和上下文占用属于单个任务，因此只放在列表行与独立小气泡中，不会被无意义地加总进汇总栏。每一行使用该任务由 Provider 实际报告的上下文窗口，GPT 与 DeepSeek 的窗口不会混用。
-- 可选的公开 API 标价等价成本估算；它会明确标为估算，不是订阅账单或 credits 余额。
-
-![中文任务列表示例，包含周额度和 5 小时额度](assets/hud-multitask.png)
-
-周额度与 5 小时额度不会被猜测，也不会按任务相加。HUD 会从已登录的官方本地 Codex 接口读取这两个百分比；不读取对话、提示词、Provider 配置或凭据。账号没有 5 小时窗口时，该项显示 `--`；接口暂时不可用时，两项都会显示 `--`，不会把另一个账号的旧数字混进来。
-
-## 桌面端、VS Code 与 CLI 来源
-
-三类任务沿用同一套简洁视觉语言，但各自有明确标记：
-
-| 来源 | 徽标 | 监听的本地 Profile |
-| --- | --- | --- |
-| Codex Desktop | 窗口轮廓 | 普通 `CODEX_HOME`（默认 `~/.codex`） |
-| VS Code 中的 Codex | VS Code 丝带图形 | 普通 `CODEX_HOME`（默认 `~/.codex`） |
-| Codex CLI · OpenAI | 终端 `>_` | 普通 `CODEX_HOME` |
-| Codex CLI · DeepSeek | 带波形的终端 | `~/.codex-deepseek` |
-
-徽标位于状态点之后、稳定任务编号之前，在主列表和独立小气泡中都会出现。汇总栏可显示各来源数量；**设置 > 监控来源** 可以分别开关四类来源。VS Code 通过它自己的 `codex_vscode` 会话来源识别，不会再被显示为桌面端任务。识别逻辑读取受限的会话元数据，不依赖写死的模型名称列表，因此以后出现新模型时仍能正常监控；只有价格未知时成本显示为 `--`。
-
-桌面端任务可以使用 Codex 本地任务链接。VS Code 和 CLI 任务不会伪装成桌面任务，请从 VS Code 或对应的 CLI Profile 恢复。
-
-原生 Codex CLI 不需要额外配置即可被监控。第二个 `~/.codex-deepseek` 根目录只是面向进阶用户的可选实测隔离约定；当前还不能任意添加其他自定义根目录。建立隔离配置前请先阅读 [Codex CLI 配置与可选 Provider 隔离](docs/CLI_PROFILE_ISOLATION.zh-CN.md)，其中说明了如何避免把凭据写进文件，以及如何随时回到完全不受影响的普通 Profile。
-
-**可能兼容，但没测：** HUD 监控的是本地 Codex session 记录，而不是某个前端专属 API，所以 Cursor、Windsurf、VS Code Insiders、`codex exec`、官方 SDK，甚至一些自定义 `codex app-server` 客户端都可能已经“碰巧能用”，只是来源徽标可能叫错。维护者懒得把每一种客户端都追着适配；愿意碰运气的话，可以看 [未验证的 Codex 客户端兼容性](docs/UNVERIFIED_CODEX_CLIENTS.zh-CN.md)，里面写了判断依据、目前最可疑的候选、已知误分类风险，以及怎么安全反馈测试结果。
-
-## 三种显示模式
-
-| 模式 | 用途 |
-| --- | --- |
-| 汇总 | 一只轻量的聚合总气泡。 |
-| 列表 | 在主 HUD 中显示稳定编号的任务行；支持行、卡片、轨道三种样式。 |
-| 分裂 | 将任务拆成独立、可调整大小的小气泡，最多 12 个。 |
-
-总气泡上的任务数量按钮只负责展开/收起内嵌列表。已经拆出的独立小气泡不会因收起列表而被合并或关闭；只有在 HUD/托盘菜单中明确选择“合并全部任务气泡”才会合并。
-
-![中文监控来源设置：桌面端、VS Code、原生 CLI 与隔离 DeepSeek CLI 可分别开启](assets/settings-sources.png)
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-hud\scripts\uninstall.ps1
+```
 
 ## 日常操作
 
-- 点击任务数量，展开或收起主 HUD 内的列表。
-- 拆出单个任务，或从 HUD / 通知区域菜单选择“全部分裂”。
-- 拖动主 HUD 保存自定义位置；双击主 HUD 打开设置。
-- 关闭独立小气泡只会把该气泡合回主 HUD，监控不会中断。主列表中的“移除任务”才会暂时移除当前 HUD 视图中的任务；对应对话开始下一轮时会自动回来。
-- 透明度支持 **0% 到 100%**。0% 会让 HUD 故意完全不可见，请用通知区域菜单或设置快捷方式恢复。
-- 开启鼠标穿透后，可从通知区域菜单关闭，或直接让 Codex 关闭。
+- 点数量胶囊展开或收起任务列表。
+- HUD 可以拖到任意位置；双击它（或用快捷方式、托盘图标）打开设置。
+- 在 HUD 或托盘菜单里拆出单个任务，或者**全部拆分**。
+- 开了鼠标穿透的话，从托盘菜单关闭，或让 Agent 帮你关。
 
-## 隐私与边界
+## 隐私
 
-所有处理都留在本机。HUD 只从已启用的本地 Profile 读取显示当前状态所需的受限信息：用量计数、模型/Provider 标签、客户端来源、生命周期事件、工作区末级名、会话 ID 和本地官方标题；不会读取 Provider 配置或认证文件，不会保存提示词、回复、工具输出、原始转录或凭据，也不会修改 Codex 会话文件。官方额度来源仅调用已登录的本地 Codex 客户端读取额度百分比；HUD 本身没有遥测，也不会处理凭据。
+所有数据都留在本机。HUD 只读取计数和元数据（Token 用量、模型、生命周期、工作目录名、标题），
+从不读取提示词、回复或工具输出，也不读取 Provider 配置和凭据。唯一的网络请求是可选的 DeepSeek
+余额查询。详见 [PRIVACY.md](PRIVACY.md) 和 [SECURITY.md](SECURITY.md)。
 
-所有已启用 Profile 合计最多扫描 64 个近期会话文件；重新打开的旧会话按最新写入时间识别。内部/子代理会话和超过保留时间的终态任务不会进入可见列表。
+## 从源码构建
 
-可选的本地 MCP 控制面支持当前 MCP `2025-11-25` 协商及兼容的旧版协议、结构化结果、按来源定位任务、受限动态通知和明确的工具错误。它可以操控 HUD，但不能通过 HUD 读取对话正文。详见 [docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md)。
+需要 Rust（版本固定在 `rust-toolchain.toml`）和 MSVC x64 构建工具。
 
-详见 [PRIVACY.md](PRIVACY.md) 与 [SECURITY.md](SECURITY.md)。
+```powershell
+cargo build --release
+cargo test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
 
-## 平台支持
+`AgentMonitorHUD.exe render-preview <目录>` 可以把 HUD 和设置窗口离屏渲染成 PNG，不会碰你的真实
+数据，本页截图就是这样生成的。
 
-- **Windows 10/11 x64：** 已支持并提供安装包。
-- **macOS / Linux / 其他架构：** 不提供二进制、安装器、工作流或支持承诺。
+## 项目说明
 
-本项目已明确放弃 macOS 适配。欢迎 macOS 用户自行基于公开源码进行移植，但本仓库只发布和验证 Windows 版本。
+非官方的独立项目，与 OpenAI、Anthropic、DeepSeek 没有关联，也未获其背书。费用数字是按公开 API
+价格的估算，不是你的订阅账单。仅支持 Windows x64。
 
-## 当前状态
+3.x 的历史仍保留在本仓库中。
 
-`3.3.0` 保留额度收尾保护和多端监控，降低后台读取与刷新路径的额外开销，并在可选的离线 API 标价快照中加入 GPT-6 Astra、Sol 和 Luna。成本是 API 等价估算，不是 Codex 积分或订阅账单。这是独立、非官方项目，与 OpenAI、Microsoft 或 DeepSeek 均没有隶属或背书关系。
-
-MIT License.
+MIT 许可证。

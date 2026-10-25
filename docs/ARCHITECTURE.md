@@ -1,127 +1,100 @@
 # Architecture
 
-## 2.2 Windows process boundary
+Agent Monitor HUD 4.x is a single native Windows executable written in Rust. It replaced the
+3.x C#/WPF application (plus its Node.js MCP host and bundled .NET runtime) while keeping the
+same look, settings file and plugin identity. The rewrite was done by Claude Opus 5.5 working
+in Claude Code; the 3.x source stays in this repository's history as the behavioural reference.
 
-```text
-Codex local files
-       |
-       v
-CodexMonitorHud.Core (net10.0, platform-neutral)
-       | parsing / discovery / incremental state / projections
-       v
-Windows WPF shell
-compiled resident monitor
-       |
-       v
-on-demand legacy Settings host (exact config/UI compatibility only)
-```
+## Process model
 
-The resident hot path is compiled C#. `CodexMonitorHud.Core` has no WPF, Windows Forms, registry, tray, or Win32 references. The Windows application is a separate `net10.0-windows` project. The full 2.1 Settings UI remains an on-demand compatibility adapter while the resident monitor and all live display surfaces use the compiled host. This split avoids making a risky settings rewrite a prerequisite for the performance migration and leaves an explicit `-Legacy` rollback.
+One executable, `AgentMonitorHUD.exe` (no .NET, Node.js, PowerShell or WebView at runtime):
 
-## Scope
-
-Codex Monitor HUD 3.3.0 is a local Windows projection over recent Codex Desktop, VS Code, and CLI session records. It combines the normal `CODEX_HOME` (`~/.codex` by default) with an optional isolated `~/.codex-deepseek` profile without reading either profile's provider configuration or authentication files. It does not maintain a historical database and does not modify Codex sessions.
-
-```text
-Codex local session JSONL + session_index.jsonl
-                    |
-                    v
-        bounded discovery and incremental reader
-                    |
-                    v
-             shared session-state table
-          /          |          |          \
-     summary       list      split      task registry
-                                  \
-                               quiet indicators
-```
-
-## Components
-
-| Component | Responsibility |
+| Mode | What it does |
 | --- | --- |
-| `src-dotnet/CodexMonitorHud.Core` | Platform-neutral configuration, bounded discovery, streaming JSONL parsing, identity, accounting, state transitions, pricing, and presentation rules. |
-| `src-dotnet/CodexMonitorHud.App` | Compiled Windows lifecycle, WPF projections, tray, DPI/Win32 integration, bubbles, signals, and MCP notice inbox. |
-| `tests-dotnet/CodexMonitorHud.Core.Tests` | Zero-dependency executable regression suite for neutral behavior. |
-| `src/MonitorHud.Core.psm1` | Configuration normalization, bounded discovery, record parsing, accounting, themes, pricing, and pure helpers. |
-| `src/CodexMonitorHUD.ps1` | On-demand exact-compatible Settings host and explicit legacy runtime rollback. |
-| `src/HudWindow.xaml` | Main summary/list/quiet shell. |
-| `src/TaskBubbleWindow.xaml` | Independent split-task surface. |
-| `src/SettingsWindow.xaml` | Settings UI loaded only by the on-demand settings process. |
-| `src/mcp-server.mjs` | Small local MCP control surface and bounded notice handoff. |
+| *(default)* | The HUD. Single instance (`Local\AgentMonitorHUD` mutex); a second launch forwards its request (`--open-settings`, `show`, …) to the running instance and exits. |
+| `mcp` | STDIO MCP server for Codex and Claude Code. Tiny, no GUI; starts the HUD if it is not running. |
+| `hook` | Claude Code hook handler: reads the hook JSON on stdin, writes a whitelisted state file, starts the HUD on `SessionStart` / `UserPromptSubmit`. Never blocks or injects into Claude. |
+| `integrate claude` / `unintegrate claude` | Adds or removes only the HUD's own hooks and user-scope MCP entry. |
+| `render-preview <dir> [scenes]` | Off-screen PNG renders of synthetic states (visual regression checks). |
+| `dump` | Prints the engine's current view as JSON (diagnostics). |
 
-## Data flow
-
-Discovery scans every enabled profile's Codex session date folders for files written inside the configured activity window, then applies one global 64-candidate cap. This prevents each added profile from multiplying the resident bound. Reopening an older conversation continues writing to its original date folder, so filtering only today's folder is incorrect. After discovery, ordinary watcher changes enqueue at most 256 affected paths. A full bounded scan occurs only for creation/deletion/rename, watcher overflow, startup, or the 30-second reconciliation boundary.
-
-On discovery, the core reverse-reads 64 KiB chunks until it has the bounded 8,192-line tail, scanning at most 32 MiB and rejecting individual records beyond 8 MiB. Newline searches operate on spans; only records crossing chunk boundaries require a pooled assembly buffer. During monitoring, each state stores its file identity and byte offset and reads only appended data. The compiled reader rents a 64 KiB buffer; the monitor gives one session at most 256 KiB and all sessions together at most 4 MiB in one dispatcher pass. Complete lines decode directly from the read buffer. It carries only the incomplete record between reads, rejects a single pending record beyond 8 MiB, and releases oversized pending storage after the record ends. Unread session and official-title work remains in explicit backlogs for later responsive ticks. Records whose top-level type cannot affect identity, lifecycle, accounting, allowance, or model/workspace context are rejected before a full object graph is created.
-
-Session identity, client surface, originator, and bounded model-provider label come from `session_meta`; user-facing conversation titles come from the matching profile's separate local `session_index.jsonl`. `codex_vscode` is classified as VS Code before the historical `source=vscode` Desktop fallback. Prompt, assistant, and tool-output text are not used for naming, source classification, or lifecycle inference. Internal/subagent source objects remain excluded. Model IDs are not allowlisted, so unknown future models keep all non-price monitoring behavior.
-
-## State and projections
-
-All surfaces read the same state objects. Split bubbles do not create new parsers. Visible membership is a projection over the discovered state table and applies internal-session, dismissal, active-window, terminal-retention, and departure rules.
-
-Task numbering is in-memory and stable for the visible lifetime of a task. Released numbers enter a bounded cooldown queue before reuse.
-
-The task registry is deliberately smaller than the UI state. Registry v2 stores only task number, workspace leaf, coarse status, update time, and bounded client/provider/profile labels so MCP controls can target the correct Desktop, VS Code, OpenAI CLI, or DeepSeek CLI task without exposing titles or transcript content.
+Threads in the HUD: the UI thread (windows, layout, Direct2D rendering), one watcher thread
+(`ReadDirectoryChangesW`) and one engine thread (discovery, incremental parsing, lifecycle). The
+engine publishes immutable snapshots to the UI.
 
 ## Rendering
 
-The dispatcher uses an adaptive 250/800/1,500 ms cadence: bursts and parser backlog stay responsive, active/listening tasks retain the existing cadence, and idle state backs off. File-system changes for sessions, official titles, notices, and control signals coalesce into an immediate dispatcher wake, so the idle cadence does not add interaction latency. Directory discovery is separately bounded. A no-change tick advances lifecycle state without statting every session path, and a timer tick does not imply a full render.
+Layered windows (`UpdateLayeredWindow`, per-pixel alpha) drawn with a Direct2D software render
+target and DirectWrite. A small WPF-like layout tree (Border / Stack / Wrap / Grid / Text /
+Ellipse / Icon / Bar / Sparkline) reproduces the XAML measure/arrange rules, so sizes and paddings
+match the 3.x windows. The settings window and color picker are drawn by the same engine. No GPU
+device is created.
 
-The runtime caches:
+The main bubble's corner drag only loosens spacing (gaps, padding, list row spacing) between a
+tight and a fully spread layout; type never scales and the bubble never reflows into a box.
 
-- locale objects;
-- appearance signatures;
-- top-level metric control structure;
-- task-list visible-content signatures;
-- context and tray menu signatures;
-- quiet-indicator projections.
+## Sources
 
-Metric values update in place. List rows rebuild only when their structural projection changes; token, context, status, and notice text update retained controls. The header uses explicit grid columns so a fully populated metric row cannot overlap the right-side list toggle.
+### Codex
 
-Unchanged appearance settings and surface state bypass signature construction. Brush cache lookups use value keys without string formatting. Summary formatting evaluates only enabled summary fields, and one dispatcher pass shares its visible-state projection between status, quiet mode, and rendering. See [the optimization review](PERFORMANCE_REVIEW.zh-CN.md) for synthetic comparisons and validation limits.
+- `~/.codex/sessions/**.jsonl` (and the optional isolated `~/.codex-deepseek` profile): only
+  `token_count`, lifecycle events and `turn_context` (model, workspace leaf) are parsed; titles come
+  from `session_index.jsonl`.
+- The 5-hour and weekly allowance comes from `token_count.rate_limits` in the session logs. The
+  official local `codex app-server` read runs only at startup and at most every 10 minutes while a
+  Codex task is visible.
+- Incremental per-file offsets plus a recursive directory watch; a full scan only at start, on
+  watcher overflow and every 5 minutes.
 
-Attention is surface-local: summary mode affects the summary, list mode the matching row, and split mode the matching independent bubble. Context alerts animate only the context metric.
+### Claude Code
 
-Each visible task has exactly one source badge after its status dot and before its stable number. Desktop uses a window outline, VS Code uses its compact ribbon, normal OpenAI CLI uses a terminal mark, and the isolated DeepSeek CLI profile uses a wave-terminal mark. Closing a detached bubble changes only its projection ownership and merges it back into the main HUD; list-row dismissal is the separate operation that temporarily removes a task from the visible set.
+- `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<project>/<sessionId>.jsonl`; subagent files never
+  become top-level tasks.
+- Identity: `sessionId`, `entrypoint` (desktop Code tab or CLI), `cwd` leaf; title from
+  `custom-title` / `ai-title` / `agent-name` records only (never message text).
+- Usage per assistant message keyed by `message.id` (+ `requestId`): later writes of the same
+  response replace earlier values. Context % = input total / model window.
+- Lifecycle from hooks (`SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure`,
+  `SessionEnd`), with transcript growth as the fallback. `waiting` means Claude needs your approval
+  or input.
+- Plan usage (5-hour and weekly %) is read from the usage samples Claude Desktop already keeps
+  locally (`plan-usage-history.json`, about every 15 minutes).
 
-## Settings process
+### DeepSeek Harness
 
-The compiled resident HUD does not construct the full Settings or Color Picker visual trees. It launches the existing single on-demand Settings host with its own mutex. Closing the window saves configuration, writes a local reload signal, and exits. The compiled HUD reloads normalized configuration and invalidates only the affected render caches.
+- `<DSH_HOME or ~/.dsh>/storages/session_projcache/sessions/<session>.json`: the harness's own
+  throttled checkpoint of its session projections. The compressed conversation log is never
+  opened.
+- Fields used: title, working directory, model, token usage, context pressure, open turn, open
+  user question, last message time.
+- Account balance (optional): only when you enter your own DeepSeek API key in Settings → Agents.
+  The key is encrypted with Windows DPAPI for the current user, stored apart from
+  `settings.json`, and sent only to `api.deepseek.com/user/balance` (every 10 minutes while
+  DeepSeek Harness was active in the last hour, otherwise hourly).
 
-## Memory behavior
+## State
 
-The resident parser, state table, and renderer now execute inside the compiled .NET process. Streaming buffers are pooled; changed paths and pending JSONL records are bounded; stable list structures retain controls instead of rebuilding them. The Settings process exits when closed, so its WPF tree and PowerShell heap are not resident.
+Everything lives in `%LOCALAPPDATA%\CodexMonitorHUD` (the 3.x folder name is kept so settings carry
+over): `settings.json`, the task registry, a per-day activity ledger (token counts per minute for
+the rhythm sparkline), `secrets\` (the DPAPI-protected key, if any) and `hud.log`.
 
-Performance numbers remain machine- and fixture-specific. The migration is an architectural improvement, not a numeric memory promise; release evidence must include idle and burst measurements from the staged compiled runtime.
+## Install layout
 
-## Windows integration
+`scripts\install.ps1` installs to `~/plugins/codex-monitor-hud` (the plugin id is unchanged), adds
+the personal marketplace entry Codex uses, refreshes Codex's plugin cache, creates the settings
+shortcuts and, when Claude Code is present, runs `integrate claude`. Coming from 3.x, the old
+plugin folder is kept whole as `~/plugins/.codex-monitor-hud-rollback-<version>` and
+`scripts\rollback.ps1` restores it. While a 3.x Node MCP server is still alive in an open Codex
+session, the native HUD keeps the legacy heartbeat fresh so that server never relaunches 3.x.
 
-- WPF provides transparent always-on-top windows.
-- Per-Monitor V2 DPI awareness, layout rounding, and pixel snapping reduce mixed-DPI blur.
-- Win32 extended styles implement optional click-through.
-- Windows Forms provides the notification-area icon and recovery menu.
-- Native window icons and a dedicated AppUserModelID prevent fallback to the PowerShell taskbar identity.
+## Fixed on purpose (compared with 3.x)
 
-## Security and privacy boundaries
-
-- no session-file writes;
-- no telemetry or runtime network access;
-- no prompt/response/tool-output parsing for identity or lifecycle;
-- no model-authored XAML, script, shader, CSS, shell command, or network theme asset;
-- bounded local notice messages and declarative animation recipes only;
-- settings and user themes live outside the installed plugin directory.
-
-The optional STDIO MCP server negotiates `2025-11-25` plus compatible older revisions and returns structured, schema-described tool results. It reads only HUD-local configuration, heartbeat, manual-exit state, and registry v2. Plugin installation is per `CODEX_HOME`; it never rewrites model/provider selections, and a new Codex task is required to discover a newly installed plugin. See `docs/MCP_INTEGRATION.md`.
-
-## Testing strategy
-
-`scripts/build-dotnet.ps1` builds the solution, runs the neutral Core suite, publishes the application, stages a private Windows Desktop runtime, and executes the staged health check. With `-RunRuntimeTests`, it also launches isolated compiled list and split WPF fixtures. Pure helpers and source contracts remain checked by `scripts/test.ps1`. `scripts/test-runtime-isolated.ps1` drives the same synthetic lifecycle and routing fixture against either `-HostMode legacy` or `-HostMode compiled`; `scripts/compare-runtime-performance.ps1` runs both hosts under the same list/split workload and records private bytes, working set, CPU, handles, and threads. Installation performs health, static, behavioral, and performance gates against a separate staged copy before switching directories; the prior installed version is retained under a versioned rollback path. Render-preview modes provide visual evidence for language, density, list style, transparency, and quiet layouts.
-
-## Portability decision
-
-A full rewrite into C# does not by itself create a macOS application: WPF, Windows Forms, notification-area behavior, click-through flags, registry integration, and AppUserModelID are Windows-only. The portable unit is the neutral Core plus file/config contracts. A macOS product should add a separate UI/system-integration project and reuse the Core rather than conditionally compiling Win32 calls throughout one application.
-
-The preferred next shell is Avalonia if maximum C# reuse is more important than perfectly native macOS controls; SwiftUI is the alternative if native menu-bar/window behavior is more important than shared UI code. Either route still needs macOS-specific work for `.app` packaging, signing/notarization, menu-bar recovery, transparent-window hit testing, launch-at-login, deep links, and Apple-silicon arm64 validation.
+| Old behaviour | New behaviour |
+| --- | --- |
+| Old conversations could stay listed forever (Codex keeps rollout files open) | A locked file is only a liveness hint while a turn is open; no "latest file of all time" fallback. |
+| Allowance read spawned `codex app-server` every 20 s | Read from session logs; the app-server read is rare (see above). |
+| Whole `sessions` tree enumerated every 30 s | Directory watch + incremental offsets. |
+| Stale `hosts/*.heartbeat` files piled up | Hosts register PID + process start time; stale entries are removed. |
+| Settings window sometimes never appeared | Settings is an in-process window of the HUD. |
+| Color picker could only pick saturated colors or white | Real HSV wheel. |
+| Font size only grew some row text | Row and bubble typography, badges and icons scale together. |

@@ -1,0 +1,49 @@
+{
+    "name":  "codex-monitor-hud",
+    "version":  "4.0.0",
+    "description":  "A native local real-time multi-task HUD for Codex, Claude Code and DeepSeek Harness on Windows.",
+    "author":  {
+                   "name":  "Agent Monitor HUD Contributors"
+               },
+    "license":  "MIT",
+    "keywords":  [
+                     "codex",
+                     "claude-code",
+                     "deepseek",
+                     "token-usage",
+                     "hud",
+                     "windows",
+                     "mcp",
+                     "local-first",
+                     "multi-task",
+                     "native"
+                 ],
+    "skills":  "./skills/",
+    "mcpServers":  "./.mcp.json",
+    "interface":  {
+                      "displayName":  "Agent Monitor HUD",
+                      "shortDescription":  "Local live monitoring for concurrent Codex, Claude Code and DeepSeek Harness tasks.",
+                      "longDescription":  "A native, local-first real-time HUD for concurrent Codex Desktop, VS Code and CLI, Claude Code (desktop Code tab and CLI) and DeepSeek Harness tasks on Windows. Distinct source badges separate every client. Keep one compact summary, expand a stable numbered task list, split selected tasks into independent bubbles, or opt in to source-labeled mid-task notices while the agent keeps working in the background.",
+                      "developerName":  "Agent Monitor HUD Contributors",
+                      "category":  "Productivity",
+                      "capabilities":  [
+                                           "Interactive"
+                                       ],
+                      "defaultPrompt":  [
+                                            "Open Agent Monitor HUD settings",
+                                            "Explain and configure proactive HUD notices",
+                                            "Explain the Monitor HUD accounting",
+                                            "Repair or restart Agent Monitor HUD"
+                                        ],
+                      "brandColor":  "#0A84FF",
+                      "composerIcon":  "./assets/icon.svg",
+                      "screenshots":  [
+                                          "./assets/hud-rhythm-dark.png",
+                                          "./assets/hud-waiting.png",
+                                          "./assets/hud-list-dark.png",
+                                          "./assets/settings-main.png",
+                                          "./assets/settings-agents.png",
+                                          "./assets/settings-main-en.png"
+                                      ]
+                  }
+}

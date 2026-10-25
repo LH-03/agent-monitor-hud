@@ -1,96 +1,139 @@
-# Codex Monitor HUD
+# Agent Monitor HUD
 
-> [简体中文](README.zh-CN.md) · Windows x64 only
+> [简体中文](README.zh-CN.md) · Windows x64 · formerly **Codex Monitor HUD**
 
-Codex Monitor HUD is a local, real-time Windows overlay for the Codex work that is active now: Codex Desktop, Codex in VS Code, the normal Codex CLI profile (usually OpenAI/GPT), and an optional isolated DeepSeek CLI profile. It is deliberately a monitor, not a chat archive, billing dashboard, or cloud service.
+A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex**,
+**Claude Code** and **DeepSeek Harness** — with token usage, context, task state and what's left of
+your plan, all read locally.
 
-## Install with one short prompt
+![Main bubble with activity rhythm and quota groups](docs/images/hud-rhythm-dark.png)
 
-Give Codex this repository URL and say: **“Install this for me.”**
+> **4.0 is a complete rewrite.** The 3.x C#/WPF app (plus a bundled .NET runtime and a Node.js MCP
+> host) was rewritten from scratch as one native Rust executable by **Claude Opus 5.5**
+> (Anthropic), working in Claude Code. The look, settings and plugin id stay the same.
 
-The repository includes [INSTALL_WITH_CODEX.md](INSTALL_WITH_CODEX.md) and [install-manifest.json](install-manifest.json). A capable agent can detect Windows x64, select a verified Release when one is available, preserve settings, health-check the installation, and retain a rollback copy. It must not inspect conversation text to install the HUD.
+The HUD, settings, Claude hooks and MCP server use the same native executable. There is no
+bundled .NET runtime, Node.js host or WebView. See [the architecture](docs/ARCHITECTURE.md).
 
-Manual installation:
+## What it watches
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-```
+| Agent | Surfaces | Plan / balance |
+| --- | --- | --- |
+| **Codex** | Desktop, VS Code, CLI, optional isolated DeepSeek CLI profile | 5-hour and weekly allowance |
+| **Claude Code** | Desktop Code tab, CLI | 5-hour and weekly plan usage (from Claude Desktop's local samples) |
+| **DeepSeek Harness** | Desktop | API balance (optional, needs your API key) |
 
-The Windows Release bundles a private .NET/WPF runtime so it can run without requiring a matching system-wide .NET installation; most of the download size comes from that runtime rather than the HUD itself.
+Every task carries a source badge, so a Claude CLI task never looks like a Codex Desktop one.
 
 ## What you see
 
-- Active, listening, idle, paused, read-error, completed, and aborted task state.
-- Cached / uncached input, output, reasoning output, per-call and per-task totals, context usage, model, and task count.
-- Latest account-wide weekly and 5-hour allowance windows from the already signed-in official local Codex interface.
-- Stable task numbers, workspace labels, and the official local conversation title from `session_index.jsonl`.
-- A source badge before every task number, so Desktop, VS Code, OpenAI CLI, and DeepSeek CLI work cannot be mistaken for one another.
-- Cache hit rate and context usage are per-task signals, so they stay on list rows and detached bubbles instead of being meaninglessly added into the summary. Each row uses that task's provider-reported context window; GPT and DeepSeek values are never mixed.
-- Optional API-list-price equivalent cost estimate, clearly marked as an estimate rather than a subscription bill or credit balance.
+**Main bubble** — choose what leads:
 
-![English task-list screenshot with weekly and 5-hour allowance](assets/hud-multitask-en.png)
+- **Metrics**: cached / uncached input, output, call total, cost estimate.
+- **Rhythm**: a sparkline of tokens per minute over the last 15/30/60 minutes, plus today's total
+  and estimated cost.
+- **None**: just status and quotas.
 
-The weekly and 5-hour values are never guessed or summed across tasks. The HUD reads the already signed-in official local Codex interface, which exposes only those allowance percentages; it does not read conversations, prompts, provider configuration, or credentials. If an account has no 5-hour window, that value shows `--`; if the interface is unavailable, both values show `--` rather than mixing values from another account.
+Followed by a compact task status (`2 tasks · 1 running · 1 waiting`) and quota groups: one small
+meter per agent and window, turning amber and red as they run low. When a task needs your reply
+or approval, a **waiting badge** lights up at the front.
 
-## Desktop, VS Code, and CLI sources
+![Waiting badge](docs/images/hud-waiting.png)
 
-The HUD uses one compact visual language across every surface, while giving each runtime a distinct mark:
+**Task list** — expand the bubble into stable numbered rows with model, context use, cache hit
+rate and lifecycle state. Rows can be split into independent bubbles, opened in Codex, or
+dismissed.
 
-| Source | Badge | Local profile watched |
-| --- | --- | --- |
-| Codex Desktop | Window outline | the normal `CODEX_HOME` (`~/.codex` by default) |
-| Codex in VS Code | VS Code ribbon | the normal `CODEX_HOME` (`~/.codex` by default) |
-| Codex CLI · OpenAI | Terminal `>_` | the normal `CODEX_HOME` |
-| Codex CLI · DeepSeek | Terminal with a wave | `~/.codex-deepseek` |
+![Task list](docs/images/hud-list-dark.png)
 
-The badge appears after the status dot and before the stable task number in both list rows and detached bubbles. The summary can show a source-count breakdown, and **Settings > Sources** can independently include or exclude all four categories. VS Code is identified from its own `codex_vscode` session originator, so it is not presented as a Desktop task. The classifier uses bounded session metadata, not a hard-coded model-name allowlist, so future models continue to be monitored even when no price is known for them.
+**Notices** — agents can (with your opt-in) put a short, source-labelled notice on their task while
+they keep working, through the bundled MCP tools.
 
-Desktop rows may use Codex's local task deep link. VS Code and CLI rows deliberately do not pretend to be Desktop tasks: resume them from VS Code or the matching CLI profile instead.
+**Drag the bubble's bottom-right corner** to loosen its spacing. Type never scales and the bubble
+always stays one strip; double-click the grip to go back to tight.
 
-Native Codex CLI monitoring works without any special setup. The second `~/.codex-deepseek` root is an optional, tested isolation convention for advanced users; arbitrary custom roots are not yet configurable. See [Codex CLI profiles and optional provider isolation](docs/CLI_PROFILE_ISOLATION.md) before creating one. The guide keeps credentials out of files and explains how to return to the untouched normal profile.
+## Settings
 
-**Possibly compatible, not tested:** because the HUD watches local Codex session records rather than a front-end-specific API, some other local Codex surfaces may already work accidentally — for example Cursor, Windsurf, VS Code Insiders, `codex exec`, official SDKs, or custom `codex app-server` clients — but they may appear under the wrong source badge. The maintainer is not going to chase every client one by one; if you enjoy trying your luck, see [Unverified Codex client compatibility](docs/UNVERIFIED_CODEX_CLIENTS.md) for the reasoning, current candidates, caveats, and a safe way to report results.
+Six pages: General, Appearance (10 themes, type, opacity, colors), Main Bubble, Tasks, Alerts and
+Agents. Changes preview live.
 
-## Display modes
+![Settings — Main Bubble](docs/images/settings-main-en.png)
 
-| Mode | Use |
-| --- | --- |
-| Summary | A compact aggregate bubble. |
-| List | Stable numbered task rows inside the main HUD; rows, cards, and rail styles are available. |
-| Split | Independent, resizable task bubbles (up to 12), backed by the same bounded task table. |
+### DeepSeek balance (optional)
 
-The aggregate count button is only a list expand/collapse control. If task bubbles have been detached, collapsing the list leaves those independent bubbles open. Use **Merge all task bubbles** from the HUD or tray menu when you actually want to merge them.
+Settings → **Agents** → *DeepSeek API key*: paste your key and press **Save**. It is encrypted with
+Windows DPAPI for your account, kept out of `settings.json`, never shown again (only the last four
+characters), and sent only to `api.deepseek.com/user/balance`. **Remove** deletes it.
 
-![English Sources settings for Desktop, VS Code, native CLI, and isolated DeepSeek CLI](assets/settings-sources-en.png)
+## Install
+
+1. Download `AgentMonitorHUD-windows-x64.zip` and `SHA256SUMS.txt` from the
+   [latest release](https://github.com/LH-03/agent-monitor-hud/releases/latest).
+2. Check the hash and extract:
+
+   ```powershell
+   (Get-FileHash .\AgentMonitorHUD-windows-x64.zip -Algorithm SHA256).Hash
+   Expand-Archive .\AgentMonitorHUD-windows-x64.zip -DestinationPath .\AgentMonitorHUD
+   ```
+
+3. Run the installer (no administrator rights needed):
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\AgentMonitorHUD\scripts\install.ps1
+   ```
+
+It installs to `~/plugins/codex-monitor-hud`, creates *Agent Monitor HUD Settings* shortcuts on the
+desktop and Start menu, registers the plugin for Codex, and — if Claude Code is installed — adds
+the HUD's lifecycle hooks and MCP server to Claude Code (`-NoClaude` skips that).
+
+Or hand the repository URL to Codex or Claude Code and say **"install this for me"**; the agent
+procedure is in [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md).
+
+**Upgrading from 3.x** is automatic: your settings carry over, and the whole 3.x plugin folder is
+kept as `~/plugins/.codex-monitor-hud-rollback-<version>`. To go back:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-hud\scripts\rollback.ps1
+```
+
+**Uninstall** (settings are kept unless you add `-RemoveSettings`):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-hud\scripts\uninstall.ps1
+```
 
 ## Everyday controls
 
-- Click the task count to expand or retract the embedded list.
-- Detach one task, or choose **Split all** from the HUD or notification-area menu.
-- Drag the main HUD to a custom position; double-click it to open Settings.
-- Closing a detached bubble merges only that bubble back into the main HUD; monitoring continues. The list-row dismiss action removes a task from the current HUD view, and it returns when that conversation starts another turn.
-- Set opacity anywhere from **0% to 100%**. At 0% the overlay is intentionally invisible; use the notification-area menu or settings shortcut to recover it.
-- If mouse click-through is enabled, use the notification-area menu or ask Codex to disable it.
+- Click the count pill to expand or collapse the task list.
+- Drag the HUD anywhere; double-click it (or use the shortcut / tray icon) to open Settings.
+- Detach one task, or **Split all**, from the HUD or the tray menu.
+- If you enable mouse click-through, turn it off from the tray menu or ask your agent.
 
-## Privacy and limits
+## Privacy
 
-All processing stays local. The HUD reads only the bounded data needed to project current state from the enabled local profile roots: usage counters, model/provider label, client surface, lifecycle events, workspace leaf, session ID, and official local title. It does not read provider configuration or authentication files; it does not store prompts, replies, tool output, raw transcripts, or credentials; and it does not modify Codex session files. The official allowance reader invokes the already signed-in local Codex client for those percentages only; the HUD itself has no telemetry and does not handle credentials.
+Everything stays on your machine. The HUD reads only counters and metadata (token usage, model,
+lifecycle, workspace folder name, titles) — never prompts, replies or tool output — and does not
+read provider config or credentials. The only network request is the optional DeepSeek balance.
+See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
 
-Task discovery is globally capped at 64 recent session files across the enabled profiles. Reopened conversations are selected by recent write time, and internal/subagent sessions plus expired terminal tasks are excluded from the user-visible projection.
+## Build from source
 
-The optional local MCP control surface supports current MCP `2025-11-25` negotiation plus compatible older revisions, structured results, source-aware task targeting, bounded visual notices, and explicit tool errors. It can operate the HUD; it cannot read transcript text through the HUD. See [docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md).
+Requires Rust (pinned in `rust-toolchain.toml`) and the MSVC x64 build tools.
 
-See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for the data boundary.
+```powershell
+cargo build --release
+cargo test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
 
-## Platform support
-
-- **Windows 10/11 x64:** supported and packaged.
-- **macOS / Linux / other architectures:** no binary, installer, workflow, or support promise is provided.
-
-macOS support has been intentionally dropped from this project. macOS users are welcome to adapt the public source on their own machines, but this repository ships and validates Windows only.
+`AgentMonitorHUD.exe render-preview <dir>` renders the HUD and settings to PNGs without touching
+your real state, which is how the screenshots here were made.
 
 ## Project status
 
-`3.3.0` keeps the allowance guard and multi-client monitoring, reduces background and refresh-path overhead, and includes GPT-6 Astra, Sol, and Luna in the optional offline API price snapshot. Cost is an API-equivalent estimate, not a Codex credit or subscription-bill calculation. This is an unofficial, independent project and is not affiliated with or endorsed by OpenAI, Microsoft, or DeepSeek.
+Unofficial and independent; not affiliated with or endorsed by OpenAI, Anthropic or DeepSeek.
+Cost figures are API-list-price estimates, not your subscription bill. Windows x64 only.
+
+The 3.x history remains in this repository.
 
 MIT License.

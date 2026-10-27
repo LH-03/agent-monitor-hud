@@ -28,6 +28,7 @@ fn main() {
     let code = match mode {
         "hook" => hook::run(),
         "mcp" => mcp::run(),
+        "speed-check" if args.len() > 2 => speed_check(&args[1], &args[2], args.get(3).and_then(|v|v.parse().ok())),
         "dump" if args.len() > 1 => dump_file(&args[1]),
         "dump" => dump(),
         "integrate" | "unintegrate" => integrate::run(&args),
@@ -37,10 +38,29 @@ fn main() {
     std::process::exit(code);
 }
 
-/// Headless diagnostics: discovers and parses the real logs once and prints
-/// the visible task table (metadata only).
-/// `dump <codex-rollout.jsonl>`: what the Codex parser extracts from one
-/// session log (identity, model, usage, lifecycle) — metadata only.
+/// Metadata-only diagnostic of the same tracker used by the running HUD.
+fn speed_check(source: &str, path: &str, as_of: Option<i64>) -> i32 {
+    attach_console();
+    let now=as_of.unwrap_or_else(util::time::now_ms);let path=std::path::Path::new(path);
+    let tracker=match source {
+        "codex"=> {
+            let model=engine::codex::hydrate(path,now).ok().map(|h|h.model).unwrap_or_default();
+            engine::speed::hydrate_codex(path,&model,now)
+        },
+        "claude"=>engine::speed::hydrate_claude(path,now),
+        "dsh"=> {
+            let Some(p)=engine::dsh::read(path) else { return 2 };
+            let mut t=engine::speed::Tracker::default();t.dsh(&p,p.last_message_at);t.refresh(now);t
+        },
+        _=>return 2,
+    };
+    let measured=tracker.raw();let active=tracker.reading("active");
+    let doc=serde_json::json!({"as_of":now,"source":source,"average_tps":measured.value,"samples":measured.samples,"sample_at":measured.at,"basis":measured.basis,"active_display_tps":active.value,"idle_display_tps":tracker.reading("idle").value,"refresh_seconds":30});
+    use std::io::Write;
+    let _=writeln!(std::io::stdout().lock(),"{doc}");0
+}
+
+/// Headless metadata diagnostics of one Codex rollout.
 fn dump_file(path: &str) -> i32 {
     attach_console();
     let path = std::path::Path::new(path);

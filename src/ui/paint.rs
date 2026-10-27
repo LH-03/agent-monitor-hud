@@ -309,7 +309,7 @@ impl Painter {
             };
             self.glow(rect, radius, ellipse, color, blur, glow_opacity * opacity * if see_through { 0.55 } else { 1.0 }, see_through);
             if see_through {
-                let wash = Paint::Solid(color.with_alpha((glow_opacity * opacity * 0.16 * 255.0).clamp(0.0, 255.0) as u8));
+                let wash = Paint::Solid(color.with_alpha((glow_opacity * opacity * 0.16 * color.a as f32).clamp(0.0, 255.0) as u8));
                 if let Some(brush) = self.paint_brush(&wash, rect) {
                     self.fill_round(rect, radius, &brush);
                 }

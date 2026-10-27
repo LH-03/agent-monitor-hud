@@ -31,6 +31,9 @@ impl Sample {
         second.key = "synthetic-2".into();
         second.number = 2;
         second.status = "waiting";
+        second.source = crate::engine::Source::Claude;
+        second.client = "claude-desktop";
+        second.provider = "anthropic".into();
         let mut display = task.snapshot.clone().unwrap();
         display.claude_five_hour_remaining = Some(22.0);
         display.claude_weekly_remaining = Some(71.0);
@@ -42,6 +45,15 @@ impl Sample {
             ledger: LedgerView { today_tokens: 2_413_000, today_cost: Some(18.4), minutes: (0..60).map(|i| (i * 137 % 4000) as i64).collect() },
             ..Default::default()
         };
+        if kind == 0 {
+            let mut third = task.clone();
+            third.key = "synthetic-3".into();
+            third.number = 3;
+            third.source = crate::engine::Source::Dsh;
+            third.client = "dsh-desktop";
+            third.provider = "deepseek".into();
+            view.tasks.push(third);
+        }
         if kind == 3 {
             view.overall_status = "idle";
             for task in &mut view.tasks { task.status = "idle"; task.started_at = now - 3_600_000; }

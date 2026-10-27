@@ -348,5 +348,6 @@
   "statusWaitingUnit": "‼",
   "waitingBadgeOne": "#{0} needs you",
   "waitingBadgeMany": "{0} need you",
-  "resizeMainBubble": "Drag to loosen spacing · double-click for tight"
+  "resizeMainBubble": "Drag to loosen spacing · double-click for tight",
+  "averageTps": "TPS"
 }

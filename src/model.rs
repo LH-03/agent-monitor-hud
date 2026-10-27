@@ -45,6 +45,12 @@ pub struct Snapshot {
     pub dsh_balance_value: Option<f64>,
     pub dsh_balance_at: Option<i64>,
     pub cost_usd: Option<f64>,
+    /// Settled model throughput, updated at most every 30 s; source basis is
+    /// explicit because native decode and API-request timings are different.
+    pub average_tps: Option<f64>,
+    pub average_tps_samples: usize,
+    pub average_tps_at: i64,
+    pub average_tps_basis: &'static str,
 }
 
 impl Snapshot {

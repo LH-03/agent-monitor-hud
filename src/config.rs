@@ -219,7 +219,7 @@ pub fn normalize(r: &mut Value, extra_languages: &[String]) {
         set_f64_clamped(r, 0.0, 0.0, 1.0, &["mainBubble", key]);
     }
     set_allowed(r, "metrics", &["metrics", "rhythm", "none"], &["mainBubble", "lead"]);
-    set_allowed(r, "groups", &["groups", "chips"], &["mainBubble", "quotaStyle"]);
+    set_allowed(r, "groups", &["groups", "compact", "chips"], &["mainBubble", "quotaStyle"]);
     set_allowed(r, "compact", &["compact", "classic"], &["mainBubble", "statusStyle"]);
     set_bool(r, true, &["mainBubble", "hideEmpty"]);
     set_bool(r, true, &["mainBubble", "waitingBadge"]);
@@ -284,6 +284,7 @@ pub struct Settings {
     pub list_style: String,
     pub list_density: String,
     pub list_detail: String,
+    pub show_average_tps: bool,
     pub name_mode: String,
     pub max_split_bubbles: usize,
     pub auto_split_new_tasks: bool,
@@ -459,6 +460,7 @@ impl Settings {
             list_style: s(&["multiTask", "listStyle"], "rows"),
             list_density: s(&["multiTask", "listDensity"], "compact"),
             list_detail: s(&["multiTask", "listDetail"], "balanced"),
+            show_average_tps: bool_or(d, &["multiTask", "showAverageTps"], true),
             name_mode: s(&["multiTask", "nameMode"], "always"),
             max_split_bubbles: i64_or(d, &["multiTask", "maxSplitBubbles"], 6).clamp(1, 12) as usize,
             auto_split_new_tasks: bool_or(d, &["multiTask", "autoSplitNewTasks"], true),

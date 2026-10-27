@@ -19,6 +19,7 @@
     "listStyle": "rows",
     "listDensity": "compact",
     "listDetail": "balanced",
+    "showAverageTps": true,
     "nameMode": "always",
     "maxSplitBubbles": 6,
     "autoSplitNewTasks": true,

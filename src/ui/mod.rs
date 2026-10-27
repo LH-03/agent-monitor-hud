@@ -11,5 +11,6 @@ pub mod preview;
 pub mod settings;
 pub mod style;
 pub mod surface;
+mod window_layer;
 pub mod tooltip;
 pub mod tray;

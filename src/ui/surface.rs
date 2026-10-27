@@ -59,6 +59,11 @@ impl Surface {
             let target = gfx.create_dc_target().ok()?;
             let painter = Painter::new(target.cast().ok()?);
             let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+            if super::window_layer::install(hwnd, ex_style.contains(WS_EX_TOPMOST)).is_err() {
+                let _ = DeleteDC(mem_dc);
+                let _ = DestroyWindow(hwnd);
+                return None;
+            }
             Some(Surface {
                 hwnd,
                 mem_dc,
@@ -227,10 +232,7 @@ impl Surface {
 
     pub fn show(&mut self, activate: bool) {
         if !self.visible {
-            unsafe {
-                let _ = ShowWindow(self.hwnd, if activate { SW_SHOW } else { SW_SHOWNOACTIVATE });
-            }
-            self.visible = true;
+            self.visible = super::window_layer::show(self.hwnd, activate);
         }
     }
 
@@ -244,17 +246,11 @@ impl Surface {
     }
 
     pub fn set_topmost(&self, topmost: bool) {
-        unsafe {
-            let _ = SetWindowPos(
-                self.hwnd,
-                Some(if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST }),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
+        super::window_layer::set(self.hwnd, topmost);
+    }
+
+    pub fn raise(&self) {
+        super::window_layer::raise(self.hwnd);
     }
 
     pub fn set_ex_style_flag(&self, flag: WINDOW_EX_STYLE, on: bool) {

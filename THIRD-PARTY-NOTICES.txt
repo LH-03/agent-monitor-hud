@@ -1,4 +1,4 @@
-Third-party notices for Agent Monitor HUD 4.0.1
+Third-party notices for Agent Monitor HUD 4.0.2
 
 The following notices cover dependencies included in the native binary.
 

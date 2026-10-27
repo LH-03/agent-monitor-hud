@@ -20,70 +20,78 @@ pub fn role_opacity(role: Role, s: &Settings, status: &str, attention: bool) -> 
         return 1.0;
     }
     let level = s.opacity.clamp(0.0, 1.0);
-    if s.transparency_mode == "layered" {
-        return match role {
-            Role::Background => 0.18 + 0.55 * level,
-            Role::Primary => 1.0,
-            Role::Secondary => 0.54 + 0.25 * level,
-            Role::Decoration => 0.28 + 0.27 * level,
-            Role::Status => 1.0,
-        };
-    }
+    let exponent = match role {
+        Role::Background | Role::Decoration => 1.0,
+        Role::Primary | Role::Secondary | Role::Status => 0.35,
+    };
+    if s.transparency_mode == "layered" { return level.powf(exponent); }
     let focused = attention || matches!(status, "active" | "completed" | "aborted" | "error" | "waiting");
     let listening = status == "listening";
-    match role {
-        Role::Background => {
-            if focused {
-                0.62 + 0.30 * level
-            } else if listening {
-                0.36 + 0.25 * level
-            } else {
-                0.14 + 0.22 * level
-            }
-        }
-        Role::Primary => {
-            if focused {
-                1.0
-            } else if listening {
-                0.94
-            } else {
-                0.84
-            }
-        }
-        Role::Secondary => {
-            if focused {
-                0.84
-            } else if listening {
-                0.68
-            } else {
-                0.52
-            }
-        }
-        Role::Decoration => {
-            if focused {
-                0.70
-            } else if listening {
-                0.48
-            } else {
-                0.30
-            }
-        }
-        Role::Status => 1.0,
-    }
+    level.powf(exponent * if focused { 1.0 } else if listening { 1.25 } else { 1.75 })
 }
 
 /// `BrushFactory.Create`.
 pub fn color(value: &str, fallback: &str, role: Role, s: &Settings, status: &str, attention: bool) -> Color {
     let c = color_or(value, fallback);
+    if role == Role::Background { return background_color(c, s, status, attention); }
     if s.transparency_mode == "uniform" {
-        // Uniform opacity applies to the whole window; make the shell opaque
-        // so 100% is truly opaque.
-        return if role == Role::Background { c.with_alpha(255) } else { c };
-    }
-    if role == Role::Status {
-        return c;
+        return c; // The layered window applies uniform opacity once.
     }
     c.scale_alpha(role_opacity(role, s, status, attention))
+}
+
+fn background_color(c: Color, s: &Settings, status: &str, attention: bool) -> Color {
+    if s.transparency_mode == "uniform" { return c.with_alpha(255); }
+    c.with_alpha(255).scale_alpha(role_opacity(Role::Background, s, status, attention))
+}
+
+#[cfg(test)]
+mod opacity_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn opacity_increases_continuously_and_reaches_opaque_in_every_mode() {
+        for mode in ["uniform", "layered", "focus"] {
+            for status in ["active", "listening", "idle"] {
+                let mut doc = crate::config::defaults();
+                doc["transparencyMode"] = json!(mode);
+                doc["background"] = json!("#20111827");
+                let mut previous = 0;
+                for level in [0.0, 0.25, 0.5, 0.75, 0.99, 1.0] {
+                    doc["opacity"] = json!(level);
+                    let s = Settings::from(&doc);
+                    let alpha = color(&s.background, "", Role::Background, &s, status, false).a;
+                    let effective = if mode == "uniform" { (alpha as f64 * level).round() as u8 } else { alpha };
+                    assert!(effective >= previous); previous = effective;
+                    if level == 0.0 { assert_eq!(effective, 0); }
+                    if mode != "uniform" && (level == 0.0 || level == 1.0) {
+                        for role in [Role::Primary, Role::Secondary, Role::Decoration, Role::Status] {
+                            assert_eq!(role_opacity(role, &s, status, false), level);
+                        }
+                    }
+                    if level == 1.0 {
+                        assert_eq!(alpha, 255);
+                        let mut gradient = s.clone(); gradient.theme.surface = "gradient".into();
+                        let Paint::Linear { stops, .. } = surface(&gradient, status, false, false) else { panic!("gradient expected") };
+                        assert!(stops.iter().all(|(_, c)| c.a == 255));
+                        let mut image = s.clone(); image.theme.surface = "image".into();
+                        let Paint::Image { opacity, .. } = surface(&image, status, false, true) else { panic!("image expected") };
+                        assert_eq!(opacity, 1.0);
+                    }
+                }
+                if mode == "layered" {
+                    doc["opacity"] = json!(0.5);
+                    let s = Settings::from(&doc);
+                    assert_eq!(role_opacity(Role::Background, &s, status, false), 0.5);
+                    for role in [Role::Primary, Role::Secondary, Role::Status] {
+                        let alpha = role_opacity(role, &s, status, false);
+                        assert!(alpha > 0.78 && alpha < 0.79);
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn solid(value: &str, fallback: &str, role: Role, s: &Settings, status: &str, attention: bool) -> Paint {
@@ -96,18 +104,16 @@ pub fn surface(s: &Settings, status: &str, attention: bool, image_available: boo
     if style.surface == "image" && image_available {
         return Paint::Image {
             key: style.background_image.clone(),
-            opacity: if s.transparency_mode == "uniform" { 1.0 } else { style.image_opacity as f32 },
+            opacity: if s.transparency_mode == "uniform" { 1.0 } else {
+                ((style.image_opacity + (1.0 - style.image_opacity) * s.opacity.clamp(0.0, 1.0))
+                    * role_opacity(Role::Background, s, status, attention)) as f32
+            },
             stretch: style.image_stretch.clone(),
         };
     }
     if style.surface == "gradient" {
-        let factor = role_opacity(Role::Background, s, status, attention);
-        let mut start = parse_color(&style.gradient_start).unwrap_or_else(|| color_or(&s.background, "#EAFFFFFF")).scale_alpha(factor);
-        let mut end = parse_color(&style.gradient_end).unwrap_or_else(|| color_or(&s.background, "#EAFFFFFF")).scale_alpha(factor);
-        if s.transparency_mode == "uniform" {
-            start = start.with_alpha(255);
-            end = end.with_alpha(255);
-        }
+        let start = background_color(parse_color(&style.gradient_start).unwrap_or_else(|| color_or(&s.background, "#EAFFFFFF")), s, status, attention);
+        let end = background_color(parse_color(&style.gradient_end).unwrap_or_else(|| color_or(&s.background, "#EAFFFFFF")), s, status, attention);
         let angle = style.gradient_angle.to_radians();
         let (dx, dy) = ((angle.cos() * 0.5) as f32, (angle.sin() * 0.5) as f32);
         return Paint::Linear { start: (0.5 - dx, 0.5 - dy), end: (0.5 + dx, 0.5 + dy), stops: vec![(0.0, start), (1.0, end)] };
@@ -118,6 +124,11 @@ pub fn surface(s: &Settings, status: &str, attention: bool, image_available: boo
 /// `ColorBrush(color, alpha)`: the color with a fixed alpha byte.
 pub fn with_alpha(value: &str, fallback: &str, alpha: u8) -> Paint {
     Paint::Solid(color_or(value, fallback).with_alpha(alpha))
+}
+
+/// Tinted controls follow the same decoration curve as shell borders.
+pub fn tint(s: &Settings, value: &str, fallback: &str, alpha: u8) -> Paint {
+    Paint::Solid(color_or(value, fallback).with_alpha(alpha).scale_alpha(role_opacity(Role::Decoration, s, "active", false)))
 }
 
 #[derive(Clone, Debug)]

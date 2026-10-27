@@ -57,7 +57,7 @@ pub struct Reader {
 impl Reader {
     /// Returns true when a new reading arrived.
     pub fn refresh(&mut self, home: &Path, now: i64) -> bool {
-        if now - self.last_check < 15_000 {
+        if now - self.last_check < 1_000 {
             return false;
         }
         self.last_check = now;
@@ -69,9 +69,9 @@ impl Reader {
         if self.path.as_ref() == Some(&path) && self.stamp == Some(stamp) {
             return false;
         }
-        self.path = Some(path.clone());
-        self.stamp = Some(stamp);
         let Some(usage) = fsx::read_text(&path).ok().and_then(|t| parse(&t)) else { return false };
+        self.path = Some(path);
+        self.stamp = Some(stamp);
         let changed = self.latest != Some(usage);
         self.latest = Some(usage);
         changed

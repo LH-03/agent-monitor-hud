@@ -164,7 +164,7 @@ pub fn run(args: &[String]) -> i32 {
     let settings = Settings::from(&document);
     let Ok(gfx) = Gfx::new() else { return 1 };
 
-    let main = match create_main_window(&gfx) {
+    let main = match create_main_window(&gfx, settings.always_on_top) {
         Some(s) => s,
         None => return 1,
     };
@@ -329,8 +329,8 @@ fn register_classes() {
     }
 }
 
-fn create_main_window(gfx: &Gfx) -> Option<Surface> {
-    Surface::create(gfx, PCWSTR(control::main_class().as_ptr()), "Agent Monitor HUD", WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, None)
+fn create_main_window(gfx: &Gfx, topmost: bool) -> Option<Surface> {
+    Surface::create(gfx, PCWSTR(control::main_class().as_ptr()), "Agent Monitor HUD", WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | if topmost { WS_EX_TOPMOST } else { WINDOW_EX_STYLE(0) }, None)
 }
 
 fn lparam_point(lp: LPARAM) -> (i32, i32) {
@@ -375,6 +375,7 @@ fn clamp_custom(left: i32, top: i32, screen: RECT, w: i32, h: i32, inset: i32) -
 }
 
 pub unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    super::window_layer::on_message(hwnd, msg, lp);
     if msg == WM_NCCREATE {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
@@ -603,8 +604,7 @@ impl App {
         self.render_notice();
         self.update_tray();
         self.ensure_anim_timer();
-        // The HUD re-asserts topmost on every repaint; an open settings window
-        // (and its color picker) stays above it.
+        // Dialogs and their popups stay above the HUD within the topmost band.
         if let Some(settings) = self.settings_window.as_ref() {
             settings.raise();
         }
@@ -684,7 +684,7 @@ impl App {
         let thumb_h = (viewport.h * viewport.h / content.rect.h).max(24.0);
         let thumb_y = viewport.y + (viewport.h - thumb_h) * (self.list_scroll / overflow);
         let mut thumb = layout::El::border(
-            layout::Paint::Solid(super::color::color_or("#66808080", "")),
+            super::style::tint(&self.settings, "#FF808080", "", 0x66),
             layout::Paint::None,
             0.0,
             3.0,
@@ -793,7 +793,7 @@ impl App {
             if self.bubbles.contains_key(&key) {
                 continue;
             }
-            let Some(surface) = Surface::create(&self.gfx, SURFACE_CLASS, "Agent Monitor HUD Task", WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, None) else { continue };
+            let Some(surface) = Surface::create(&self.gfx, SURFACE_CLASS, "Agent Monitor HUD Task", WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | if s.always_on_top { WS_EX_TOPMOST } else { WINDOW_EX_STYLE(0) }, None) else { continue };
             self.bubbles.insert(
                 key,
                 Bubble { surface, manual_size: None, manual_pos: false, collapsed: false, attention_rev: 0, exit_rev: 0 },
@@ -1547,7 +1547,7 @@ impl App {
                 self.open_task(&key);
                 return;
             }
-            if !self.is_button(hwnd, id) {
+            if id == hud::ID_SHELL {
                 self.open_settings();
             }
             return;
@@ -1722,6 +1722,7 @@ impl App {
     }
 
     pub fn open_settings(&mut self) {
+        self.engine.send(Command::RefreshAccounts);
         super::settings::open(self);
     }
 

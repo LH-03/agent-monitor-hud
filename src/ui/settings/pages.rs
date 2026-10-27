@@ -509,7 +509,7 @@ fn main_bubble(ui: &Ui, b: &mut Builder) -> El {
             ),
             row(ui.t("mainLead"), ui.opt("mainLeadHint"), Some(segments(ui, b, &["mainBubble", "lead"], s_items(ui, &[("metrics", "mainLeadMetrics"), ("rhythm", "mainLeadRhythm"), ("none", "mainLeadNone")])))),
             row(ui.t("mainStatus"), ui.opt("mainStatusHint"), Some(status_segments)),
-            row(ui.t("mainQuotaStyle"), ui.opt("mainQuotaStyleHint"), Some(segments(ui, b, &["mainBubble", "quotaStyle"], s_items(ui, &[("groups", "mainQuotaGroups"), ("chips", "mainQuotaChips")])))),
+            row(ui.t("mainQuotaStyle"), ui.opt("mainQuotaStyleHint"), Some(segments(ui, b, &["mainBubble", "quotaStyle"], s_items(ui, &[("groups", "mainQuotaGroups"), ("compact", "mainQuotaCompact"), ("chips", "mainQuotaChips")])))),
             switch_row(ui, b, &["mainBubble", "hideEmpty"], "mainHideEmpty", Some("mainHideEmptyHint")),
             switch_row(ui, b, &["mainBubble", "waitingBadge"], "mainWaitingBadge", Some("mainWaitingBadgeHint")),
             row(ui.t("mainSize"), ui.opt("mainSizeHint"), Some(size_control)),
@@ -577,6 +577,7 @@ fn tasks(ui: &Ui, b: &mut Builder) -> El {
         vec![
             row(ui.t("listStyle"), ui.opt(match ui.s(&["multiTask", "listStyle"]).as_str() { "cards" => "listCardsHint", "rail" => "listRailHint", _ => "listRowsHint" }), Some(combo(ui, b, &["multiTask", "listStyle"], s_items(ui, &[("rows", "listRows"), ("cards", "listCards"), ("rail", "listRail")])))),
             row(ui.t("listFieldsTitle"), ui.opt("listDetailHint"), Some(combo(ui, b, &["multiTask", "listDetail"], s_items(ui, &[("compact", "listDetailCompact"), ("balanced", "listDetailBalanced"), ("detailed", "listDetailDetailed")])))),
+            switch_row(ui, b, &["multiTask", "showAverageTps"], "averageTps", Some("averageTpsHint")),
         ],
         ui.opt("taskListScopeHint"),
     );
@@ -712,12 +713,14 @@ fn alerts(ui: &Ui, b: &mut Builder) -> El {
 
 fn source_row(ui: &Ui, b: &mut Builder, path: &'static [&'static str], icon: &str, color: &str, fill: bool, label: &str) -> El {
     let rgb = &color[3..];
-    let badge = El::border(c(&format!("#14{rgb}")), Paint::None, 0.0, 7.0)
+    let background = if path == &["sessionSources", "desktop"] || path == &["sessionSources", "claudeCli"] { c(hud::DARK_SOURCE_BADGE) } else { c(&format!("#14{rgb}")) };
+    let brand = hud::is_filled_brand(icon);
+    let badge = El::border(background, Paint::None, 0.0, 7.0)
         .w(26.0)
         .h(26.0)
         .va(Align::Center)
         .m(Th::new(0.0, 0.0, 10.0, 0.0))
-        .child(El::icon(icon, c(color), if fill { c(color) } else { Paint::None }, if fill { 0.8 } else { 1.4 }, IconFit::Viewbox, 14.0, 14.0).ha(Align::Center).va(Align::Center));
+        .child(El::icon(icon, if brand { Paint::None } else { c(color) }, if fill || brand { c(color) } else { Paint::None }, if brand { 0.0 } else if fill { 0.8 } else { 1.4 }, if brand { IconFit::Uniform } else { IconFit::Viewbox }, 14.0, 14.0).ha(Align::Center).va(Align::Center));
     let on = ui.b(path);
     let id = b.add(Control::Check(CheckKey::Path(path)));
     let grid = El::grid(vec![Len::Auto, Len::Star(1.0), Len::Auto], vec![])
@@ -728,19 +731,13 @@ fn source_row(ui: &Ui, b: &mut Builder, path: &'static [&'static str], icon: &st
 }
 
 fn agents(ui: &Ui, b: &mut Builder) -> El {
-    const DESKTOP: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M1.4,4.8 L12.6,4.8 M3,3.45 L3.08,3.45 M4.75,3.45 L4.83,3.45";
-    const VSCODE: &str = "M11.52,0.29 A0.98,0.98 0 0 0 10.82,0.33 L4.21,3.33 L1.5,1.29 A1,1 0 0 0 0,2.09 L0,13.91 A1,1 0 0 0 1.5,14.71 L4.21,12.68 L10.82,15.67 A0.98,0.98 0 0 0 11.52,15.71 L15,14.11 A1,1 0 0 0 15.6,13 L15.6,3 A1,1 0 0 0 15,2.09 Z M11,11.26 L5.73,8 L11,4.74 Z";
-    const CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M7.15,9.15 L10.65,9.15";
-    const DEEPSEEK: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M2.8,8.4 C4.1,5.7 5.55,10.4 7.05,7.65 C8.15,5.65 9.3,7.25 11.2,5.75";
-    const CLAUDE: &str = "M7,1.2 L7,12.8 M1.2,7 L12.8,7 M2.9,2.9 L11.1,11.1 M11.1,2.9 L2.9,11.1 M4.6,1.6 L9.4,12.4 M9.4,1.6 L4.6,12.4";
-    const CLAUDE_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M9.3,5.2 L9.3,9.4 M7.2,7.3 L11.4,7.3 M7.8,5.8 L10.8,8.8 M10.8,5.8 L7.8,8.8";
     let codex = group(
         Some("Codex".into()),
         vec![
-            source_row(ui, b, &["sessionSources", "desktop"], DESKTOP, BLUE, false, "sourceDesktopOption"),
-            source_row(ui, b, &["sessionSources", "vscode"], VSCODE, "#FF007ACC", true, "sourceVsCodeOption"),
-            source_row(ui, b, &["sessionSources", "defaultCli"], CLI, "#FF8B5CF6", false, "sourceDefaultCliOption"),
-            source_row(ui, b, &["sessionSources", "deepSeekCli"], DEEPSEEK, "#FF00A7B5", false, "sourceDeepSeekCliOption"),
+            source_row(ui, b, &["sessionSources", "desktop"], hud::ICON_CODEX, hud::CODEX_DESKTOP_COLOR, false, "sourceDesktopOption"),
+            source_row(ui, b, &["sessionSources", "vscode"], hud::ICON_VSCODE, "#FF007ACC", true, "sourceVsCodeOption"),
+            source_row(ui, b, &["sessionSources", "defaultCli"], hud::ICON_CLI, hud::CODEX_CLI_COLOR, false, "sourceDefaultCliOption"),
+            source_row(ui, b, &["sessionSources", "deepSeekCli"], hud::ICON_DEEPSEEK, hud::CODEX_CLI_COLOR, false, "sourceDeepSeekCliOption"),
             row(ui.t("codexQuotaRow"), ui.opt("codexQuotaSourceHint"), Some(text(ui.codex_quota, 12.5, 400, MUTED))),
         ],
         None,
@@ -748,8 +745,8 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
     let claude = group(
         Some("Claude Code".into()),
         vec![
-            source_row(ui, b, &["sessionSources", "claudeDesktop"], CLAUDE, hud::CLAUDE_COLOR, false, "sourceClaudeDesktopOption"),
-            source_row(ui, b, &["sessionSources", "claudeCli"], CLAUDE_CLI, hud::CLAUDE_COLOR, false, "sourceClaudeCliOption"),
+            source_row(ui, b, &["sessionSources", "claudeDesktop"], hud::ICON_CLAUDE, hud::CLAUDE_COLOR, false, "sourceClaudeDesktopOption"),
+            source_row(ui, b, &["sessionSources", "claudeCli"], hud::ICON_CLAUDE_CLI, hud::CLAUDE_COLOR, false, "sourceClaudeCliOption"),
             row(ui.t("claudeQuotaRow"), ui.opt("claudeQuotaSourceHint"), Some(text(ui.claude_quota, 12.5, 400, MUTED))),
         ],
         None,
@@ -777,7 +774,7 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
         vec![
             source_row(ui, b, &["sessionSources", "deepseekHarness"], hud::ICON_DSH, hud::DSH_COLOR, false, "sourceDshOption"),
             key_row,
-            row(ui.t("dshBalance"), None, Some(text(ui.balance_status, 12.5, 400, MUTED))),
+            row(ui.t("dshBalance"), ui.opt("dshBalanceRefreshHint"), Some(text(ui.balance_status, 12.5, 400, MUTED))),
         ],
         ui.opt("dshApiKeyPrivacy"),
     );

@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.0.2 - Source icons, usage and window fixes
+
+- Use official source marks for Codex Desktop, VS Code, Claude Code and DeepSeek
+  Harness, including Clawd for Claude Code CLI.
+- Refresh available Codex, Claude and DeepSeek account data more promptly; show
+  quota groups only for sources with active tasks.
+- Add a sampled TPS indicator to task lists and detached bubbles. Tool calls and
+  inactive tasks show zero; unavailable timing remains unavailable.
+- Add a choice of quota presentation, correct opacity and layered fade behaviour,
+  and refine main-bubble labels.
+- Keep the HUD above ordinary windows and route task-row double-clicks to the
+  corresponding Codex Desktop task when available.
+- Update the API price catalog, including GPT-6.1 Terra and DeepSeek time-based
+  rates. Estimates are not subscription charges.
+
 ## 4.0.1 - Settings, account refresh and layout polish
 
 - Fix DeepSeek balance updates remaining stuck in an already-open settings window.

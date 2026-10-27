@@ -52,7 +52,10 @@ impl MsgUsage {
 /// writes replace (field-wise maximum) instead of adding.
 #[derive(Debug, Default)]
 pub struct TranscriptState {
-    responses: HashMap<u64, MsgUsage>,
+    pub speed: super::speed::Tracker,
+    responses: HashMap<u64, (MsgUsage, Option<f64>)>,
+    cost: f64,
+    unpriced: usize,
     pub totals: MsgUsage,
     pub last: Option<(MsgUsage, i64)>,
     pub last_message_hash: u64,
@@ -116,11 +119,11 @@ impl TranscriptState {
         }
     }
 
-    pub fn apply_line(&mut self, line: &[u8], now: i64) -> Change {
+    pub fn apply_line(&mut self, line: &[u8], now: i64, pricing: &crate::pricing::Catalog) -> Change {
         self.records += 1;
         // `type` follows the (possibly large) message body in assistant records,
         // so the whole line is searched before the full parse.
-        let interesting = contains(line, b"\"type\":\"assistant\"")
+        let interesting = contains(line, b"\"api-request\"") || contains(line, b"\"type\":\"assistant\"")
             || contains(line, b"\"type\":\"user\"")
             || contains(line, b"\"custom-title\"")
             || contains(line, b"\"ai-title\"")
@@ -130,6 +133,7 @@ impl TranscriptState {
             return Change::Activity;
         }
         let Ok(root) = serde_json::from_slice::<Value>(line) else { return Change::None };
+        self.speed.claude_record(&root);
         let kind = root.get("type").and_then(Value::as_str).unwrap_or("");
         let mut change = Change::Activity;
         if self.session_id.is_empty() {
@@ -219,15 +223,19 @@ impl TranscriptState {
                         hash(root.get("uuid").and_then(Value::as_str).unwrap_or(""))
                     };
                     let merged = match self.responses.get(&key) {
-                        Some(previous) => {
+                        Some((previous, cost)) => {
                             let merged = previous.max(observed);
                             self.totals.add(*previous, -1);
+                            match cost { Some(c) => self.cost -= c, None => self.unpriced -= 1 }
                             merged
                         }
                         None => observed,
                     };
                     self.totals.add(merged, 1);
-                    self.responses.insert(key, merged);
+                    let tokens = crate::pricing::Tokens { input: merged.prompt_total(), cached: merged.cache_read, output: merged.output, write_5m: merged.write_5m, write_1h: merged.write_1h };
+                    let cost = pricing.call(&self.model, tokens, merged.prompt_total(), at);
+                    match cost { Some(c) => self.cost += c, None => self.unpriced += 1 }
+                    self.responses.insert(key, (merged, cost));
                     self.last = Some((merged, at));
                     self.last_message_hash = key;
                     result = Change::Usage;
@@ -269,6 +277,7 @@ impl TranscriptState {
             model: self.model.clone(),
             workspace: self.workspace.clone(),
             active_tasks: 1,
+            cost_usd: (self.unpriced == 0).then_some(self.cost.max(0.0)),
             ..Default::default()
         })
     }
@@ -367,9 +376,9 @@ mod tests {
         let rec = |out: i64| format!(
             r#"{{"type":"assistant","sessionId":"s1","entrypoint":"claude-desktop","cwd":"D:\\Work\\proj","requestId":"r1","timestamp":"2026-10-24T11:12:38.915Z","message":{{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{{"input_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":{out},"cache_creation":{{"ephemeral_1h_input_tokens":100,"ephemeral_5m_input_tokens":0}}}}}}}}"#
         );
-        assert_eq!(t.apply_line(rec(10).as_bytes(), 0), Change::Usage);
-        t.apply_line(rec(30).as_bytes(), 0);
-        t.apply_line(rec(30).as_bytes(), 0);
+        assert_eq!(t.apply_line(rec(10).as_bytes(), 0, &crate::pricing::Catalog::load("", Path::new("."))), Change::Usage);
+        t.apply_line(rec(30).as_bytes(), 0, &crate::pricing::Catalog::load("", Path::new(".")));
+        t.apply_line(rec(30).as_bytes(), 0, &crate::pricing::Catalog::load("", Path::new(".")));
         assert_eq!(t.totals.output, 30);
         assert_eq!(t.totals.write_1h, 100);
         let s = t.snapshot().unwrap();
@@ -380,13 +389,18 @@ mod tests {
         assert!(s.accounting_ok());
         assert_eq!(t.client(), "claude-desktop");
         assert_eq!(t.workspace, "proj");
+        assert!((s.cost_usd.unwrap() - (2.0*4.0 + 100.0*8.0 + 1000.0*0.2 + 30.0*20.0)/1_000_000.0).abs() < 1e-12);
+        let next = rec(20).replace("m1", "m2").replace("claude-opus-5-5", "claude-sonnet-5-5");
+        t.apply_line(next.as_bytes(), 0, &crate::pricing::Catalog::load("", Path::new(".")));
+        let expected = s.cost_usd.unwrap() + (2.0*2.0 + 100.0*4.0 + 1000.0*0.1 + 20.0*10.0)/1_000_000.0;
+        assert!((t.snapshot().unwrap().cost_usd.unwrap() - expected).abs() < 1e-12);
     }
     #[test]
     fn prompt_vs_tool_result() {
         let mut t = TranscriptState::default();
         let prompt = br#"{"type":"user","turnOrigin":"human","message":{"role":"user","content":[{"type":"text","text":"x"}]}}"#;
         let tool = br#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}"#;
-        assert_eq!(t.apply_line(prompt, 1), Change::Prompt);
-        assert_ne!(t.apply_line(tool, 2), Change::Prompt);
+        assert_eq!(t.apply_line(prompt, 1, &crate::pricing::Catalog::load("", Path::new("."))), Change::Prompt);
+        assert_ne!(t.apply_line(tool, 2, &crate::pricing::Catalog::load("", Path::new("."))), Change::Prompt);
     }
 }

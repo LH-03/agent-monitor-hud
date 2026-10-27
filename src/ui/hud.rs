@@ -5,7 +5,7 @@
 use super::color::color_or;
 use super::gfx::FontKey;
 use super::layout::{Align, El, HoverStyle, IconFit, Kind, Len, Paint, Th};
-use super::style::{self, Role, solid, with_alpha};
+use super::style::{self, Role, solid, with_alpha, tint};
 use crate::config::Settings;
 use crate::engine::{Source, TaskView, View};
 use crate::format;
@@ -21,18 +21,21 @@ pub const DETACH: &str = "M1.5,4.5 L1.5,10.5 L7.5,10.5 M5.2,1.5 L10.5,1.5 L10.5,
 pub const MERGE: &str = "M1.5,1.5 L10.5,1.5 L10.5,10.5 L1.5,10.5 Z M9.1,2.9 L4.1,7.9 M4.1,4.8 L4.1,7.9 L7.2,7.9";
 pub const DISMISS: &str = "M2.5,2.5 L9.5,9.5 M9.5,2.5 L2.5,9.5";
 const RESIZE_GRIP: &str = "M4,13 L13,4 M8,13 L13,8";
-const ICON_VSCODE: &str = "M11.52,0.29 A0.98,0.98 0 0 0 10.82,0.33 L4.21,3.33 L1.5,1.29 A1,1 0 0 0 0,2.09 L0,13.91 A1,1 0 0 0 1.5,14.71 L4.21,12.68 L10.82,15.67 A0.98,0.98 0 0 0 11.52,15.71 L15,14.11 A1,1 0 0 0 15.6,13 L15.6,3 A1,1 0 0 0 15,2.09 Z M11,11.26 L5.73,8 L11,4.74 Z";
-const ICON_DESKTOP: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M1.4,4.8 L12.6,4.8 M3,3.45 L3.08,3.45 M4.75,3.45 L4.83,3.45";
-const ICON_DEEPSEEK: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M2.8,8.4 C4.1,5.7 5.55,10.4 7.05,7.65 C8.15,5.65 9.3,7.25 11.2,5.75";
-const ICON_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M7.15,9.15 L10.65,9.15";
-/// Claude Code: a spark (the Claude mark is a radial burst) on the same 14-unit grid.
-const ICON_CLAUDE: &str = "M7,1.2 L7,12.8 M1.2,7 L12.8,7 M2.9,2.9 L11.1,11.1 M11.1,2.9 L2.9,11.1 M4.6,1.6 L9.4,12.4 M9.4,1.6 L4.6,12.4";
-/// Claude Code CLI: terminal frame with the spark.
-const ICON_CLAUDE_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M9.3,5.2 L9.3,9.4 M7.2,7.3 L11.4,7.3 M7.8,5.8 L10.8,8.8 M10.8,5.8 L7.8,8.8";
-/// DeepSeek Harness: a whale outline (the DeepSeek mark) on the same grid.
-pub const ICON_DSH: &str = "M1.2,8.3 C1.2,5.9 3.4,4.6 6.2,4.6 C8.4,4.6 9.8,5.8 10.4,7.2 L12.8,4.2 L12.4,8.9 C11.6,11 9.4,12.2 6.6,12.2 C3.4,12.2 1.2,10.6 1.2,8.3 Z M2.2,9.6 C4.4,10.6 7.4,10.5 9.8,9.2 M4,7.2 L4.08,7.2";
+/// Official VS Code silhouette from the locally installed application.
+pub const ICON_VSCODE: &str = include_str!("../../resources/icons/vscode.path");
+pub const ICON_DEEPSEEK: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M2.8,8.4 C4.1,5.7 5.55,10.4 7.05,7.65 C8.15,5.65 9.3,7.25 11.2,5.75";
+pub const ICON_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M7.15,9.15 L10.65,9.15";
+/// Official Claude flower shared by desktop identity and quota groups.
+pub const ICON_CLAUDE: &str = include_str!("../../resources/icons/claude.path");
+/// Official Clawd mascot for Claude Code CLI identity.
+pub const ICON_CLAUDE_CLI: &str = include_str!("../../resources/icons/clawd.path");
+/// Official DeepSeek whale shared by Harness identity and balance groups.
+pub const ICON_DSH: &str = include_str!("../../resources/icons/deepseek.path");
 pub const CLAUDE_COLOR: &str = "#FFD97757";
 pub const DSH_COLOR: &str = "#FF4D6BFE";
+pub const CODEX_DESKTOP_COLOR: &str = "#FFFFFFFF";
+pub const CODEX_CLI_COLOR: &str = "#FF0A84FF";
+pub const DARK_SOURCE_BADGE: &str = "#FF2C2F35";
 
 // Element ids (hit testing). Row actions are encoded as ROW_BASE + index*8 + action.
 pub const ID_SHELL: u32 = 1;
@@ -105,11 +108,11 @@ pub fn source_label(t: &TaskView, loc: &Locale) -> String {
 pub fn source_color(t: &TaskView, s: &Settings) -> String {
     match t.client {
         "vscode" => "#FF007ACC".into(),
-        "desktop" => s.accent.clone(),
+        "desktop" => CODEX_DESKTOP_COLOR.into(),
         "claude-desktop" | "claude-cli" | "claude-unknown" => CLAUDE_COLOR.into(),
         "dsh-desktop" => DSH_COLOR.into(),
-        _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => "#FF00A7B5".into(),
-        "cli" => "#FF8B5CF6".into(),
+        _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => CODEX_CLI_COLOR.into(),
+        "cli" => CODEX_CLI_COLOR.into(),
         _ => s.muted.clone(),
     }
 }
@@ -117,25 +120,35 @@ pub fn source_color(t: &TaskView, s: &Settings) -> String {
 pub fn source_geometry(t: &TaskView) -> &'static str {
     match t.client {
         "vscode" => ICON_VSCODE,
-        "desktop" => ICON_DESKTOP,
-        "claude-desktop" | "claude-unknown" => ICON_CLAUDE,
-        "claude-cli" => ICON_CLAUDE_CLI,
+        "desktop" => ICON_CODEX,
+        "claude-desktop" => ICON_CLAUDE,
+        "claude-cli" | "claude-unknown" => ICON_CLAUDE_CLI,
         "dsh-desktop" => ICON_DSH,
         _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => ICON_DEEPSEEK,
         _ => ICON_CLI,
     }
 }
 
+fn source_badge_background(t: &TaskView, s: &Settings, alpha: u8) -> Paint {
+    if matches!(t.client, "desktop" | "claude-cli" | "claude-unknown") {
+        solid(DARK_SOURCE_BADGE, DARK_SOURCE_BADGE, Role::Decoration, s, t.status, false)
+    } else {
+        tint(s, &source_color(t, s), "#FF64748B", alpha)
+    }
+}
+
+pub fn is_filled_brand(icon: &str) -> bool { icon.starts_with("F1 ") || icon.starts_with("F0 ") }
+
 fn source_icon(t: &TaskView, s: &Settings, status: &str, attention: bool, w: f32) -> El {
     let color = source_color(t, s);
     let stroke = solid(&color, "#FF64748B", Role::Primary, s, status, attention);
-    let vscode = t.client == "vscode";
+    let brand = is_filled_brand(source_geometry(t));
     El::icon(
         source_geometry(t),
-        stroke.clone(),
-        if vscode { stroke } else { Paint::None },
-        if vscode { 0.45 } else { 1.45 },
-        IconFit::Viewbox,
+        if brand { Paint::None } else { stroke.clone() },
+        if brand { stroke } else { Paint::None },
+        if brand { 0.0 } else { 1.45 },
+        if brand { IconFit::Uniform } else { IconFit::Viewbox },
         w,
         w,
     )
@@ -156,8 +169,8 @@ pub fn can_open(t: &TaskView) -> bool {
     t.source == Source::Codex && t.client == "desktop"
 }
 
-fn icon_button_scaled(id: u32, geometry: &str, color: &str, size: f32, margin: Th, tip: String, k: f32) -> El {
-    El::border(with_alpha(color, "#FF8A94A6", 0x08), Paint::None, 0.0, 6.0 * k)
+fn icon_button_scaled(s: &Settings, id: u32, geometry: &str, color: &str, size: f32, margin: Th, tip: String, k: f32) -> El {
+    El::border(tint(s, color, "#FF8A94A6", 0x08), Paint::None, 0.0, 6.0 * k)
         .w(size)
         .h(size)
         .m(margin)
@@ -166,13 +179,13 @@ fn icon_button_scaled(id: u32, geometry: &str, color: &str, size: f32, margin: T
         .hand()
         .tip(tip)
         .hover(HoverStyle {
-            bg: with_alpha(color, "#FF0A84FF", 0x1C),
+            bg: tint(s, color, "#FF0A84FF", 0x1C),
             stroke: Paint::None,
-            pressed_bg: with_alpha(color, "#FF0A84FF", 0x30),
+            pressed_bg: tint(s, color, "#FF0A84FF", 0x30),
             pressed_opacity: 0.82,
         })
         .child(
-            El::icon(geometry, Paint::Solid(color_or(color, "#FF0A84FF")), Paint::None, 1.25 * k, IconFit::Uniform,
+            El::icon(geometry, solid(color, "#FF0A84FF", Role::Primary, s, "active", false), Paint::None, 1.25 * k, IconFit::Uniform,
                 if geometry == DISMISS { 11.0 * k } else { 13.0 * k }, if geometry == DISMISS { 11.0 * k } else { 13.0 * k })
                 .ha(Align::Center)
                 .va(Align::Center),
@@ -270,7 +283,11 @@ pub fn task_metrics_text(t: &TaskView, c: &Ctx, list: bool) -> String {
     let mut parts = vec![c.loc.get(status_key(t.status)).to_string()];
     if list {
         let metrics = format::task_list_metrics(snapshot, &s.list_detail, c.loc, &s.number_format);
-        parts.extend(metrics.primary.iter().filter(|m| m.key != "context").map(metric_text));
+        for metric in metrics.primary.iter().filter(|m|m.key!="context") {
+            parts.push(metric_text(metric));
+            if metric.key=="model" && s.show_average_tps { parts.push(average_tps_text(t,c)); }
+        }
+        if snapshot.model.trim().is_empty() && s.show_average_tps { parts.push(average_tps_text(t,c)); }
         if !metrics.diagnostics.is_empty() {
             let diagnostics: Vec<String> = metrics.diagnostics.iter().map(metric_text).collect();
             return format!("{}\n{}", parts.join(" · "), diagnostics.join(" · "));
@@ -280,6 +297,7 @@ pub fn task_metrics_text(t: &TaskView, c: &Ctx, list: bool) -> String {
         if f.model && !snapshot.model.trim().is_empty() {
             parts.push(snapshot.model.clone());
         }
+        if s.show_average_tps { parts.push(average_tps_text(t,c)); }
         if f.call_total {
             parts.push(format!("{} {}", c.loc.get("callTotal"), format::number(snapshot.call_total, &s.number_format)));
         }
@@ -297,6 +315,22 @@ pub fn task_metrics_text(t: &TaskView, c: &Ctx, list: bool) -> String {
         }
     }
     parts.join(" · ")
+}
+
+fn average_tps_text(t: &TaskView, c: &Ctx) -> String {
+    let value=if t.status!="active" { Some(0.0) } else { t.snapshot.as_ref().and_then(|s|s.average_tps) };
+    let number=value.map(|v|if v==0.0 { "0".into() } else { format!("{v:.1}") }).unwrap_or_else(||"--".into());
+    format!("{} {number}",c.loc.get("averageTps"))
+}
+fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
+    let Some(s)=&t.snapshot else { return c.sloc.get("averageTpsUnavailable").into() };
+    let key=match s.average_tps_basis { "output-window"=>"averageTpsCodex", "api-request"=>"averageTpsClaude", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
+    let mut text=c.sloc.get(key).to_string();
+    if s.average_tps_samples>0 {
+        text.push_str(&format!(" · {}: {}",c.sloc.get("averageTpsSamples"),s.average_tps_samples));
+        if s.average_tps_at>0 { text.push_str(&format!(" · {}",time::local_hms(s.average_tps_at))); }
+    }
+    text
 }
 
 pub fn context_tooltip(t: &TaskView, loc: &Locale) -> String {
@@ -434,7 +468,7 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
         let k = type_scale(s);
         header.push(
             // The disclosure and row actions share one control size and radius.
-            El::border(with_alpha(&s.accent, "#FF0A84FF", 0x08), Paint::None, 0.0, 6.0 * k)
+            El::border(tint(s, &s.accent, "#FF0A84FF", 0x08), Paint::None, 0.0, 6.0 * k)
                 .p(scale_th(Th::new(d.toggle_padding, 0.0, d.toggle_padding, 0.0), k))
                 .m(Th::new(d.header_gap * k + SPREAD_GAP * 0.4 * m.spread.0, 0.0, 0.0, 0.0))
                 .min_w((d.action_size * k).round())
@@ -445,13 +479,13 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
                 .hand()
                 .tip(c.sloc.get("activeTasks"))
                 .hover(HoverStyle {
-                    bg: with_alpha(&s.accent, "#FF0A84FF", 0x1C),
+                    bg: tint(s, &s.accent, "#FF0A84FF", 0x1C),
                     stroke: Paint::None,
-                    pressed_bg: with_alpha(&s.accent, "#FF0A84FF", 0x30),
+                    pressed_bg: tint(s, &s.accent, "#FF0A84FF", 0x30),
                     pressed_opacity: 0.84,
                 })
                 .child({
-                    let blue = Paint::Solid(color_or(&s.accent, "#FF0A84FF"));
+                    let blue = solid(&s.accent, "#FF0A84FF", Role::Primary, s, status, attention);
                     let chevron = El::icon(
                         if list_expanded { "M0.8,4.6 L4.5,1 L8.2,4.6" } else { "M0.8,1 L4.5,4.6 L8.2,1" },
                         blue.clone(),
@@ -485,8 +519,8 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
 /// Custom id for the scrollable list host (drawn with a clip + offset).
 pub const SCROLL_LIST: u32 = 1;
 
-/// Codex mark for quota groups: a hexagonal knot on the shared 14-unit grid.
-const ICON_CODEX: &str = "M7,1.4 L11.9,4.2 L11.9,9.8 L7,12.6 L2.1,9.8 L2.1,4.2 Z M7,4.7 L9.4,6.1 L9.4,7.9 L7,9.3 L4.6,7.9 L4.6,6.1 Z";
+/// Official OpenAI knot shared by Codex desktop identity and quota groups.
+pub const ICON_CODEX: &str = include_str!("../../resources/icons/openai.path");
 const CODEX_COLOR: &str = "#FF10A37F";
 const QUOTA_WARN: &str = "#FFFF9F0A";
 const QUOTA_CRIT: &str = "#FFFF453A";
@@ -497,11 +531,11 @@ fn item_container(s: &Settings) -> El {
     let r = s.corner_radius as f32;
     let d = density(&s.list_density);
     let mut item = match s.layout.as_str() {
-        "chips" => El::border(with_alpha(accent, "#FF0A84FF", 24), Paint::None, 0.0, (r - 10.0).max(8.0)),
-        "compact" => El::border(with_alpha(accent, "#FF0A84FF", 18), Paint::None, 0.0, (r - 12.0).max(7.0)),
-        "outline" => El::border(with_alpha(accent, "#FF0A84FF", 8), with_alpha(accent, "#FF0A84FF", 82), 1.0, (r - 10.0).max(8.0)),
-        "cards" => El::border(with_alpha(accent, "#FF0A84FF", 16), with_alpha(accent, "#FF0A84FF", 42), 1.0, (r - 8.0).max(9.0)).min_h(d.metric_card_height * type_scale(s)),
-        "stacked" => El::border(with_alpha(accent, "#FF0A84FF", 16), Paint::None, 0.0, (r - 10.0).max(8.0)),
+        "chips" => El::border(tint(s, accent, "#FF0A84FF", 24), Paint::None, 0.0, (r - 10.0).max(8.0)),
+        "compact" => El::border(tint(s, accent, "#FF0A84FF", 18), Paint::None, 0.0, (r - 12.0).max(7.0)),
+        "outline" => El::border(tint(s, accent, "#FF0A84FF", 8), tint(s, accent, "#FF0A84FF", 82), 1.0, (r - 10.0).max(8.0)),
+        "cards" => El::border(tint(s, accent, "#FF0A84FF", 16), tint(s, accent, "#FF0A84FF", 42), 1.0, (r - 8.0).max(9.0)).min_h(d.metric_card_height * type_scale(s)),
+        "stacked" => El::border(tint(s, accent, "#FF0A84FF", 16), Paint::None, 0.0, (r - 10.0).max(8.0)),
         _ => El::border(Paint::None, Paint::None, 0.0, 0.0),
     };
     item.padding = scale_th(match s.layout.as_str() {
@@ -550,6 +584,7 @@ fn quota_color(remaining: f64) -> Option<&'static str> {
 }
 
 struct QuotaSource {
+    source: Source,
     name: &'static str,
     icon: &'static str,
     color: &'static str,
@@ -559,7 +594,7 @@ struct QuotaSource {
     note: String,
 }
 
-fn quota_sources(c: &Ctx, d: &crate::model::Snapshot) -> Vec<QuotaSource> {
+fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec<QuotaSource> {
     let s = c.s;
     let short5 = c.loc.get("quotaShortFiveHour").to_string();
     let short_week = c.loc.get("quotaShortWeek").to_string();
@@ -567,7 +602,8 @@ fn quota_sources(c: &Ctx, d: &crate::model::Snapshot) -> Vec<QuotaSource> {
     let balance_note = d.dsh_balance_at.map(|at| c.sloc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(at))).unwrap_or_default();
     vec![
         QuotaSource {
-            name: "Codex",
+            source: Source::Codex,
+            name: agent_short_name(Source::Codex),
             icon: ICON_CODEX,
             color: CODEX_COLOR,
             windows: vec![
@@ -578,70 +614,84 @@ fn quota_sources(c: &Ctx, d: &crate::model::Snapshot) -> Vec<QuotaSource> {
             note: String::new(),
         },
         QuotaSource {
-            name: "Claude",
+            source: Source::Claude,
+            name: agent_short_name(Source::Claude),
             icon: ICON_CLAUDE,
             color: CLAUDE_COLOR,
             windows: vec![
-                (short5, c.loc.get("claudeFiveHourRemaining").to_string(), d.claude_five_hour_remaining, s.field("claudeFiveHourRemaining")),
-                (short_week, c.loc.get("claudeWeeklyRemaining").to_string(), d.claude_weekly_remaining, s.field("claudeWeeklyRemaining")),
+                (short5, c.loc.get("fiveHourRemaining").to_string(), d.claude_five_hour_remaining, s.field("claudeFiveHourRemaining")),
+                (short_week, c.loc.get("weeklyRemaining").to_string(), d.claude_weekly_remaining, s.field("claudeWeeklyRemaining")),
             ],
             balance: None,
             note: claude_note,
         },
         QuotaSource {
-            name: "DeepSeek",
+            source: Source::Dsh,
+            name: agent_short_name(Source::Dsh),
             icon: ICON_DSH,
             color: DSH_COLOR,
             windows: Vec::new(),
             balance: d.dsh_balance.clone().map(|b| (b, s.field("dshBalance"))).or_else(|| (!s.main.hide_empty && s.field("dshBalance")).then(|| ("--".to_string(), true))),
             note: balance_note,
         },
-    ]
+    ].into_iter().filter(|source| tasks.iter().any(|t|
+        matches!(t.status, "active" | "waiting" | "listening")
+            && t.source.quota_source(&t.provider, t.profile) == Some(source.source))).collect()
 }
 
-/// Quota items: per-agent groups with meters, or classic labelled chips.
-fn quota_items(c: &Ctx, d: &crate::model::Snapshot) -> Vec<El> {
+/// Quota items: per-agent meters, compact readings, or classic labelled chips.
+fn quota_items(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec<El> {
     let s = c.s;
     let k = type_scale(s);
     let hide = s.main.hide_empty;
+    let compact = s.main.quota_style == "compact";
     let mut items = Vec::new();
-    for source in quota_sources(c, d) {
+    for source in quota_sources(c, d, tasks) {
         let windows: Vec<&(String, String, Option<f64>, bool)> = source.windows.iter().filter(|w| w.3 && (!hide || w.2.is_some())).collect();
         let balance = source.balance.as_ref().filter(|b| b.1);
         if windows.is_empty() && balance.is_none() {
             continue;
         }
         if s.main.quota_style == "chips" {
-            for (_, full, value, _) in windows {
+            for (short, _, value, _) in windows {
                 let text = value.map(format::percent).unwrap_or_else(|| "--".into());
-                items.push(metric_item(s, full, &text, value.and_then(quota_color)).tip(source.note.clone()));
+                items.push(metric_item(s, &format!("{} {short}", source.name), &text, value.and_then(quota_color)).tip(source.note.clone()));
             }
             if let Some((text, _)) = balance {
-                items.push(metric_item(s, c.loc.get("dshBalance"), text, None).tip(source.note.clone()));
+                items.push(metric_item(s, &format!("{} {}", source.name, c.loc.get("quotaShortBalance")), text, None).tip(source.note.clone()));
             }
             continue;
         }
         let mut group = El::hstack().va(Align::Center);
-        let icon = El::icon(source.icon, solid(source.color, source.color, Role::Primary, s, "idle", false), Paint::None, 1.4, IconFit::Viewbox, (12.0 * k).round(), (12.0 * k).round())
+        let brand = is_filled_brand(source.icon);
+        let paint = solid(source.color, source.color, Role::Primary, s, "idle", false);
+        let icon = El::icon(source.icon, if brand { Paint::None } else { paint.clone() }, if brand { paint } else { Paint::None }, if brand { 0.0 } else { 1.4 }, if brand { IconFit::Uniform } else { IconFit::Viewbox }, (12.0 * k).round(), (12.0 * k).round())
                 .va(Align::Center)
                 .m(Th::new(0.0, 0.0, (6.0 * k).round(), 0.0));
-        let card_header = if s.layout == "cards" {
+        let card_header = if s.layout == "cards" && !compact {
             Some(El::hstack().child(icon).child(label_text(s, source.name)).m(Th::new(0.0, 0.0, 0.0, 3.0 * k)))
         } else {
             group.push(icon);
             None
         };
         let mut tip = vec![source.name.to_string()];
-        for (i, (short, full, value, _)) in windows.iter().enumerate() {
+        for (i, (short, _, value, _)) in windows.iter().enumerate() {
             let text = value.map(format::percent).unwrap_or_else(|| "--".into());
-            tip.push(format!("{full} {text}"));
+            tip.push(format!("{short} {text}"));
             let color = value.and_then(quota_color);
             let fill = color.unwrap_or("#FF34C759");
-            group.push(label_text(s, short.clone()).m(Th::new(if i > 0 { (8.0 * k).round() } else { 0.0 }, 0.0, (4.0 * k).round(), 0.0)));
-            group.push(
+            if compact {
+                if i > 0 {
+                    group.push(label_text(s, "/").m(scale_th(Th::new(6.0, 0.0, 6.0, 0.0), k)));
+                } else if windows.len() == 1 {
+                    group.push(label_text(s, short.clone()).m(scale_th(Th::new(0.0, 0.0, 4.0, 0.0), k)));
+                }
+            } else {
+                group.push(label_text(s, short.clone()).m(Th::new(if i > 0 { (8.0 * k).round() } else { 0.0 }, 0.0, (4.0 * k).round(), 0.0)));
+                group.push(
                 El::bar(
                     value.unwrap_or(0.0) as f32 / 100.0,
-                    with_alpha(&s.muted, "#FF8A94A6", 0x40),
+                    tint(s, &s.muted, "#FF8A94A6", 0x40),
                     solid(fill, fill, Role::Status, s, "active", false),
                     (26.0 * k).round(),
                     (4.0 * k).round().max(3.0),
@@ -649,11 +699,12 @@ fn quota_items(c: &Ctx, d: &crate::model::Snapshot) -> Vec<El> {
                 .va(Align::Center)
                 .m(Th::new(0.0, 0.0, (5.0 * k).round(), 0.0)),
             );
+            }
             group.push(value_text(s, text, color));
         }
         if let Some((text, _)) = balance {
-            tip.push(format!("{} {text}", c.loc.get("dshBalance")));
-            group.push(label_text(s, c.loc.get("quotaShortBalance")).m(Th::new(0.0, 0.0, (4.0 * k).round(), 0.0)));
+            tip.push(format!("{} {text}", c.loc.get("quotaShortBalance")));
+            if !compact { group.push(label_text(s, c.loc.get("quotaShortBalance")).m(Th::new(0.0, 0.0, (4.0 * k).round(), 0.0))); }
             group.push(value_text(s, text.clone(), None));
         }
         if !source.note.is_empty() {
@@ -663,7 +714,13 @@ fn quota_items(c: &Ctx, d: &crate::model::Snapshot) -> Vec<El> {
             Some(header) => El::vstack().child(header).child(group).va(Align::Center),
             None => group,
         };
-        items.push(item_container(s).va(Align::Center).tip(tip.join(" · ")).child(content));
+        let mut item = item_container(s);
+        if compact {
+            item.kind = Kind::Border { bg: tint(s, &s.foreground, "#FF111827", 0x0D), stroke: Paint::None, thickness: 0.0, radius: 12.0 * k };
+            item.padding = scale_th(density(&s.list_density).metric_padding, k);
+            item.min_h = 0.0;
+        }
+        items.push(item.va(Align::Center).tip(tip.join(" · ")).child(content));
     }
     items
 }
@@ -676,7 +733,7 @@ fn rhythm_item(c: &Ctx, m: &MainModel) -> El {
     let n = s.main.rhythm_minutes.min(ledger.minutes.len()).max(2);
     let values: Vec<f32> = ledger.minutes[ledger.minutes.len() - n..].iter().map(|v| *v as f32).collect();
     let mut row = El::hstack().va(Align::Center);
-    let spark = El::spark(values, solid(&s.accent, "#FF0A84FF", Role::Primary, s, "active", false), with_alpha(&s.accent, "#FF0A84FF", 0x30), (64.0 * k).round(), (16.0 * k).round())
+    let spark = El::spark(values, solid(&s.accent, "#FF0A84FF", Role::Primary, s, "active", false), tint(s, &s.accent, "#FF0A84FF", 0x30), (64.0 * k).round(), (16.0 * k).round())
             .va(Align::Center)
             .m(Th::new(0.0, 0.0, (8.0 * k).round(), 0.0));
     if s.layout != "cards" {
@@ -716,14 +773,7 @@ fn status_item(c: &Ctx, tasks: &[TaskView]) -> El {
             row.push(label_text(s, c.loc.get(key)));
         }
     }
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for t in tasks {
-        let label = source_label(t, c.loc);
-        match groups.iter_mut().find(|(l, _)| *l == label) {
-            Some(g) => g.1 += 1,
-            None => groups.push((label, 1)),
-        }
-    }
+    let groups = agent_counts(tasks);
     let tip = groups.iter().map(|(l, n)| format!("{l} {n}")).collect::<Vec<_>>().join(" · ");
     let content = if s.layout == "cards" {
         El::vstack().va(Align::Center).child(label_text(s, c.loc.get("activeTasks")).m(Th::new(0.0, 0.0, 0.0, 3.0 * type_scale(s)))).child(row)
@@ -748,7 +798,7 @@ fn waiting_badge(c: &Ctx, tasks: &[TaskView]) -> Option<El> {
     let tip = waiting.iter().map(|t| display_name(t, s, c.loc, true)).collect::<Vec<_>>().join("\n");
     let k = type_scale(s);
     Some(
-        El::border(with_alpha(QUOTA_WARN, QUOTA_WARN, 0x2E), with_alpha(QUOTA_WARN, QUOTA_WARN, 0x66), 1.0, (s.corner_radius as f32 - 10.0).max(8.0))
+        El::border(tint(s, QUOTA_WARN, QUOTA_WARN, 0x2E), tint(s, QUOTA_WARN, QUOTA_WARN, 0x66), 1.0, (s.corner_radius as f32 - 10.0).max(8.0))
             .p(scale_th(density(&s.list_density).metric_padding, k))
             .m(scale_th(Th::new(0.0, 0.0, density(&s.list_density).item_gap, 0.0), k))
             .va(Align::Center)
@@ -798,7 +848,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
     }
     if s.field("activeTasks") {
         if s.main.status_style == "classic" {
-            let classic = add_source_breakdown(metrics.iter().filter(|mt| mt.key == "activeTasks").cloned().collect(), &view.tasks, c.loc);
+            let classic = add_source_breakdown(metrics.iter().filter(|mt| mt.key == "activeTasks").cloned().collect(), &view.tasks);
             for metric in classic {
                 items.push(metric_item(s, &metric.label, &metric.value, None));
             }
@@ -806,7 +856,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
             items.push(status_item(c, &view.tasks));
         }
     }
-    items.extend(quota_items(c, display));
+    items.extend(quota_items(c, display, &view.tasks));
     let gap = SPREAD_GAP * m.spread.0;
     for (i, mut item) in items.into_iter().enumerate() {
         if s.layout != "inline" && i > 0 {
@@ -829,24 +879,24 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
     wrap
 }
 
-fn add_source_breakdown(mut metrics: Vec<format::Metric>, tasks: &[TaskView], loc: &Locale) -> Vec<format::Metric> {
+fn agent_counts(tasks: &[TaskView]) -> Vec<(&'static str, usize)> {
+    let mut groups: Vec<_> = [Source::Codex, Source::Claude, Source::Dsh].into_iter()
+        .map(|source| (agent_short_name(source), tasks.iter().filter(|t| t.source == source).count()))
+        .filter(|(_, count)| *count > 0).collect();
+    groups.sort_by(|a, b| b.1.cmp(&a.1));
+    groups
+}
+
+fn agent_short_name(source: Source) -> &'static str {
+    match source { Source::Codex => "Codex", Source::Claude => "CC", Source::Dsh => "DSH" }
+}
+
+fn add_source_breakdown(mut metrics: Vec<format::Metric>, tasks: &[TaskView]) -> Vec<format::Metric> {
     if metrics.is_empty() || tasks.is_empty() {
         return metrics;
     }
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for t in tasks {
-        let label = source_label(t, loc);
-        match groups.iter_mut().find(|(l, _)| l.eq_ignore_ascii_case(&label)) {
-            Some(g) => g.1 += 1,
-            None => groups.push((label, 1)),
-        }
-    }
-    // Same order as the 3.x HUD under the zh collation: count descending, then
-    // labels starting with a Han character before Latin ones.
-    let han = |l: &str| l.chars().next().is_some_and(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
-    groups.sort_by(|a, b| {
-        b.1.cmp(&a.1).then_with(|| han(&b.0).cmp(&han(&a.0))).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
-    });
+    if let Some(metric) = metrics.iter_mut().find(|m| m.key == "activeTasks") { metric.value = tasks.len().to_string(); }
+    let groups = agent_counts(tasks);
     if groups.len() == 1 && tasks.iter().all(|t| t.client != "cli") {
         return metrics;
     }
@@ -897,7 +947,7 @@ pub(super) fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_ga
         .fx(fx_key(&format!("row.dot:{}", t.key)))
         .collapsed(s.list_style == "rail");
     let source = El::border(
-        with_alpha(&source_color(t, s), "#FF64748B", 20),
+        source_badge_background(t, s, 20),
         Paint::None,
         0.0,
         (d.badge_radius * k).round(),
@@ -948,10 +998,10 @@ pub(super) fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_ga
     )
     .va(Align::Center)
     .ha(Align::Stretch)
-    .tip(metrics_text)
+    .tip(if s.show_average_tps { format!("{metrics_text}\n{}",average_tps_tooltip(t,c)) } else { metrics_text })
     .at(0, 1);
     let context = El::border(
-        with_alpha(&s.foreground, "#FF111827", 0x08),
+        tint(s, &s.foreground, "#FF111827", 0x08),
         Paint::None,
         0.0,
         (d.badge_radius * k).round(),
@@ -967,6 +1017,7 @@ pub(super) fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_ga
     .at(0, 0);
     let mut metrics_host = El::grid(vec![Len::Auto, Len::Star(1.0)], vec![]).va(Align::Center).child(context).child(metrics);
     let action = icon_button_scaled(
+        s,
         id(ROW_ACTION),
         if detached { MERGE } else { DETACH },
         &s.accent,
@@ -975,7 +1026,7 @@ pub(super) fn task_row(c: &Ctx, t: &TaskView, index: u32, detached: bool, row_ga
         c.sloc.get(if detached { "mergeTask" } else { "detachTask" }).into(),
         k,
     );
-    let dismiss = icon_button_scaled(id(ROW_DISMISS), DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("dismissTask").into(), k);
+    let dismiss = icon_button_scaled(s, id(ROW_DISMISS), DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("dismissTask").into(), k);
     let two_rows = detailed || s.list_style == "cards";
     let span = if two_rows { 2 } else { 1 };
     grid.push(dot.at(0, 0).span(span, 1));
@@ -1101,7 +1152,7 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
     if !collapsed {
         let header = El::hstack()
             .child(
-                El::border(with_alpha(&source_color(t, s), "#FF64748B", 20), Paint::None, 0.0, d.badge_radius * k)
+                El::border(source_badge_background(t, s, 20), Paint::None, 0.0, d.badge_radius * k)
                     .p(scale_th(d.source_padding, k))
                     .m(scale_th(d.source_margin, k))
                     .va(Align::Center)
@@ -1126,7 +1177,7 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
             .m(scale_th(Th::new(0.0, d.section_gap, 0.0, 0.0), k))
             .child(
                 El::border(
-                    with_alpha(&s.foreground, "#FF111827", 0x08),
+                    tint(s, &s.foreground, "#FF111827", 0x08),
                     Paint::None,
                     0.0,
                     d.badge_radius * k,
@@ -1151,11 +1202,12 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
                     },
                 )
                 .max_w(520.0 * k)
+                .tip(if s.show_average_tps { average_tps_tooltip(t,c) } else { String::new() })
                 .va(Align::Center),
             );
         dock.push(El::vstack().child(header).child(details).va(Align::Center).at(0, 1));
-        dock.push(icon_button_scaled(ID_BUBBLE_MERGE, MERGE, &s.accent, (d.action_size * k).round(), scale_th(d.action_margin, k), c.sloc.get("mergeTask").into(), k).at(0, 2));
-        dock.push(icon_button_scaled(ID_BUBBLE_DISMISS, DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("closeTaskBubble").into(), k).at(0, 3));
+        dock.push(icon_button_scaled(s, ID_BUBBLE_MERGE, MERGE, &s.accent, (d.action_size * k).round(), scale_th(d.action_margin, k), c.sloc.get("mergeTask").into(), k).at(0, 2));
+        dock.push(icon_button_scaled(s, ID_BUBBLE_DISMISS, DISMISS, &s.muted, (d.action_size * k).round(), scale_th(d.dismiss_margin, k), c.sloc.get("closeTaskBubble").into(), k).at(0, 3));
     }
     let shell = El::border(
         style::surface(s, status, attention, c.image_available),
@@ -1180,7 +1232,7 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
                 .opacity(0.62)
                 .id(ID_BUBBLE_RESIZE)
                 .tip(c.sloc.get("resizeTaskBubble"))
-                .child(El::icon(RESIZE_GRIP, Paint::Solid(color_or("#A60A84FF", "")), Paint::None, 1.35, IconFit::Viewbox, 18.0, 18.0)),
+                .child(El::icon(RESIZE_GRIP, solid("#A60A84FF", "", Role::Decoration, s, status, attention), Paint::None, 1.35, IconFit::Viewbox, 18.0, 18.0)),
         );
     }
     let mut window = El::panel().max_w(960.0).max_h(360.0).child(root);
@@ -1195,7 +1247,10 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
 /// The proactive-notice card shown next to the HUD (new in 4.0: a labelled,
 /// readable card instead of a prefix in the metrics line).
 pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
-    let s = c.s;
+    let mut notice_settings = c.s.clone();
+    notice_settings.opacity = 1.0;
+    notice_settings.transparency_mode = "uniform".into();
+    let s = &notice_settings;
     let notice = t.notice.as_ref()?;
     let accent = notice.recipe.as_ref().map(|r| r.color.clone()).unwrap_or_else(|| s.notices.color.clone());
     let family = s.theme.font_family.as_str();
@@ -1214,7 +1269,7 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
                 .at(0, 0),
         )
         .child(
-            El::border(with_alpha(&source_color(t, s), "#FF64748B", 24), with_alpha(&source_color(t, s), "#FF64748B", 72), 1.0, 7.0)
+            El::border(source_badge_background(t, s, 24), with_alpha(&source_color(t, s), "#FF64748B", 72), 1.0, 7.0)
                 .p(Th::new(4.0, 3.0, 4.0, 3.0))
                 .m(Th::new(0.0, 0.0, 7.0, 0.0))
                 .va(Align::Center)
@@ -1265,4 +1320,92 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
     .fx(fx_key("notice.card"))
     .child(El::vstack().child(header).child(message));
     Some(El::panel().m(Th::all(BUBBLE_INSET + 8.0)).child(card))
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+    use crate::locale::Catalog;
+
+    #[test]
+    fn average_speed_control_and_inactive_states_match_list_and_bubble() {
+        let catalog=Catalog::load(std::path::Path::new("nonexistent-preview-locales"));
+        let mut doc=crate::config::defaults();
+        let mut task=crate::ui::preview::synthetic(1,1000);
+        task.snapshot.as_mut().unwrap().average_tps=Some(52.4);
+        let check=|doc:&serde_json::Value,task:&TaskView,list| {
+            let settings=Settings::from(doc);
+            let ctx=Ctx{s:&settings,loc:&catalog.zh,sloc:&catalog.zh,zh:&catalog.zh,en:&catalog.en,now:1000,image_available:false};
+            task_metrics_text(task,&ctx,list)
+        };
+        for list in [true,false] {
+            assert!(check(&doc,&task,list).contains("TPS 52.4"));
+            task.status="waiting";assert!(check(&doc,&task,list).contains("TPS 0"));
+            task.status="active";
+            doc["multiTask"]["showAverageTps"]=serde_json::json!(false);
+            assert!(!check(&doc,&task,list).contains("TPS"));
+            doc["multiTask"]["showAverageTps"]=serde_json::json!(true);
+        }
+    }
+
+    #[test]
+    fn compact_readings_keep_window_order_and_do_not_draw_meters() {
+        let catalog = Catalog::load(std::path::Path::new("nonexistent-preview-locales"));
+        let mut doc = crate::config::defaults();
+        doc["mainBubble"]["quotaStyle"] = serde_json::json!("compact");
+        let settings = Settings::from(&doc);
+        let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
+        let mut tasks: Vec<_> = (1..=3).map(|i| crate::ui::preview::synthetic(i, 1000)).collect();
+        tasks[1].source = Source::Claude; tasks[2].source = Source::Dsh;
+        let mut snapshot = crate::model::Snapshot { five_hour_remaining: Some(75.0), weekly_remaining: Some(80.0), claude_five_hour_remaining: Some(22.0), claude_weekly_remaining: Some(52.0), dsh_balance: Some("¥23.50".into()), ..Default::default() };
+        fn text(el: &El) -> Vec<String> {
+            assert!(!matches!(el.kind, Kind::Bar { .. }));
+            let mut values = if let Kind::Text { text, .. } = &el.kind { vec![text.clone()] } else { Vec::new() };
+            for child in &el.children { values.extend(text(child)); }
+            values
+        }
+        let items = quota_items(&c, &snapshot, &tasks);
+        assert_eq!(items.len(), 3);
+        assert_eq!(text(&items[0]), ["75%", "/", "80%"]);
+        assert_eq!(text(&items[1]), ["22%", "/", "52%"]);
+        assert_eq!(text(&items[2]), ["¥23.50"]);
+        snapshot.weekly_remaining = None;
+        assert_eq!(text(&quota_items(&c, &snapshot, &tasks)[0]), ["5h", "75%"]);
+        snapshot.five_hour_remaining = None;
+        assert_eq!(quota_items(&c, &snapshot, &tasks).len(), 2);
+        doc["mainBubble"]["quotaStyle"] = serde_json::json!("chips");
+        let settings = Settings::from(&doc);
+        let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
+        snapshot.five_hour_remaining = Some(11.0); snapshot.weekly_remaining = Some(80.0);
+        let chips = quota_items(&c, &snapshot, &tasks);
+        assert_eq!(text(&chips[0]), ["Codex 5h", "11%"]);
+        assert_eq!(text(&chips[1]), ["Codex 周", "80%"]);
+        assert_eq!(text(&chips[2]), ["CC 5h", "22%"]);
+    }
+
+    #[test]
+    fn only_live_accounts_appear_in_summary() {
+        let catalog = Catalog::load(std::path::Path::new("nonexistent-preview-locales"));
+        let settings = Settings::from(&crate::config::defaults());
+        let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
+        let snapshot = crate::model::Snapshot::default();
+        let mut tasks: Vec<_> = (1..=3).map(|i| crate::ui::preview::synthetic(i, 1000)).collect();
+        tasks[1].source = Source::Claude;
+        tasks[1].status = "idle";
+        tasks[2].source = Source::Dsh;
+        tasks[2].status = "completed";
+        let visible = |tasks: &[TaskView]| quota_sources(&c, &snapshot, tasks).into_iter().map(|s| s.source).collect::<Vec<_>>();
+        assert_eq!(visible(&tasks), vec![Source::Codex]);
+        tasks[1].status = "waiting";
+        assert_eq!(visible(&tasks), vec![Source::Codex, Source::Claude]);
+        tasks[0].status = "completed";
+        tasks[2].status = "active";
+        assert_eq!(visible(&tasks), vec![Source::Claude, Source::Dsh]);
+        tasks[1].status = "idle";
+        tasks[2].source = Source::Codex;
+        tasks[2].provider = "deepseek".into();
+        assert_eq!(visible(&tasks), vec![Source::Dsh]);
+        tasks[2].status = "idle";
+        assert!(visible(&tasks).is_empty());
+    }
 }

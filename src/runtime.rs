@@ -23,6 +23,8 @@ pub enum Command {
     HoldExits(bool),
     Pause(bool),
     Official(Option<allowance::Official>),
+    /// Opening settings requests fresh account readings, with a short throttle.
+    RefreshAccounts,
     /// The stored DeepSeek key changed: re-read the balance now.
     DshKeyChanged,
     DshBalance(Result<engine::dsh_balance::Balance, engine::dsh_balance::Failure>),
@@ -108,9 +110,11 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
     let mut last_notice_scan = time::MIN;
     let mut responsive_until = 0i64;
     let mut official_running = false;
-    let mut official_next = time::now_ms() + 10_000;
+    let mut official_next = time::now_ms() + 1_000;
+    let mut official_last = time::MIN;
     let mut balance_running = false;
     let mut balance_next = time::now_ms() + 3_000;
+    let mut balance_last = time::MIN;
 
     let now = time::now_ms();
     engine.apply_hook_events(hook::drain_events(&paths), now);
@@ -133,6 +137,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
                 engine.ledger.save(time::now_ms());
+                engine.costs.save(time::now_ms(), true);
                 return;
             }
         }
@@ -150,6 +155,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
             match cmd {
                 Command::Quit => {
                     engine.ledger.save(now);
+                    engine.costs.save(now, true);
                     return;
                 }
                 Command::Paths(paths_changed) => {
@@ -194,16 +200,30 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                             engine.dsh_balance = Some((balance, now));
                             engine.dsh_balance_failure = None;
                         }
-                        Err(failure) => engine.dsh_balance_failure = Some(failure),
+                        Err(failure) => {
+                            if failure == engine::dsh_balance::Failure::Unauthorized {
+                                balance_next = now + 5 * 60 * 1000;
+                            }
+                            engine.dsh_balance_failure = Some(failure);
+                        }
                     }
                     engine.revision += 1;
                 }
                 Command::Official(result) => {
                     official_running = false;
-                    if engine.official_allowance != result {
-                        engine.official_allowance = result;
-                        engine.revision += 1;
+                    if let Some(reading) = result {
+                        if engine.official_allowance.as_ref() != Some(&reading) {
+                            engine.official_allowance = Some(reading);
+                            engine.revision += 1;
+                        }
+                    } else {
+                        // Retain the last observation during temporary failures.
+                        official_next = now + 30_000;
                     }
+                }
+                Command::RefreshAccounts => {
+                    official_next = official_next.min(now.max(official_last + 5_000));
+                    balance_next = balance_next.min(now.max(balance_last + 5_000));
                 }
             }
         }
@@ -241,29 +261,44 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
         }
         engine.advance(now);
         engine.ledger.maybe_save(now);
+        engine.costs.save(now, false);
 
-        // Official allowance: rare, background, only while Codex work is visible.
+        // Live session readings publish immediately; background reads also catch
+        // account changes made elsewhere and resets while no task is visible.
         let view = {
             let _p = crate::util::prof::probe(crate::util::prof::VIEW);
             engine.view(now)
         };
-        let codex_visible = view.tasks.iter().any(|t| t.source == engine::Source::Codex);
-        // DeepSeek balance: only with a user-provided key; every 10 min while
-        // DSH was used in the last hour, otherwise hourly.
+        let codex_enabled = engine.settings.sources.desktop || engine.settings.sources.vscode || engine.settings.sources.default_cli;
+        let codex_active = view.tasks.iter().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Codex) && matches!(t.status, "active" | "waiting" | "listening"));
+        if codex_active { official_next = official_next.min(official_last + 30_000); }
+        let dsh_active = engine.dsh_recently_active(now) || view.tasks.iter().any(|t|
+            t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && matches!(t.status, "active" | "waiting" | "listening"));
+        if dsh_active && engine.dsh_balance_failure != Some(engine::dsh_balance::Failure::Unauthorized) {
+            balance_next = balance_next.min(balance_last + 30_000);
+        }
+        if last_view.as_ref().is_some_and(|previous| previous.tasks.iter().any(|t|
+            t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && t.status == "active"
+                && !view.tasks.iter().any(|next| next.key == t.key && next.status == "active"))) {
+            balance_next = balance_next.min((now + 2_000).max(balance_last + 5_000));
+        }
+        // A supplied key enables balance reads: 30s while active, 5min idle,
+        // with a short debounced read when a DSH turn settles.
         if !balance_running && now >= balance_next {
-            let active = engine.dsh_recently_active(now);
-            balance_next = now + if active { 10 * 60 * 1000 } else { 60 * 60 * 1000 };
+            balance_next = now + if dsh_active { 30_000 } else { 5 * 60 * 1000 };
             if let Some(key) = crate::secrets::load_deepseek_key(&paths) {
                 balance_running = true;
+                balance_last = now;
                 let tx = self_tx.clone();
                 std::thread::spawn(move || {
                     let _ = tx.send(Command::DshBalance(engine::dsh_balance::fetch(&key)));
                 });
             }
         }
-        if !official_running && now >= official_next && codex_visible {
+        if !official_running && now >= official_next && codex_enabled {
             official_running = true;
-            official_next = now + 10 * 60 * 1000;
+            official_last = now;
+            official_next = now + if codex_active { 30_000 } else { 2 * 60 * 1000 };
             let tx = self_tx.clone();
             let home = paths.codex_home.clone();
             std::thread::spawn(move || {

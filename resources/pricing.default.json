@@ -1,20 +1,22 @@
 {
   "_schema": "codex-monitor-hud-pricing-v1",
   "_source": {
-    "name": "OpenAI API model pricing",
-    "url": "https://developers.openai.com/api/docs/models",
-    "checked_at": "2026-09-23",
+    "checked_at": "2026-10-27",
     "currency": "USD",
     "unit": "per_million_text_tokens",
-    "note": "Standard short-context API text-token list-price estimate only; not a Codex subscription bill or usage-credit statement. Long-context (>272K input tokens), cache-write, Batch, Flex, Fast mode, regional-processing, and tool charges are not included.",
-    "anthropic": {
-      "name": "Anthropic Claude API list prices (first-party)",
-      "checked_at": "2026-10-24",
-      "note": "cache_write_5m = 1.25x input, cache_write_1h = 2x input; cache reads per model. Long-context tiers, batch, fast mode and subscription plans are not represented."
-    }
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "deepseek": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "note": "API text-token equivalent, not a subscription bill. Standard processing unless the log reports a supported tier. No unreported regional or server-tool charges. Pre-observation OpenAI cumulative history uses short-context standard rates; Claude prices each deduplicated response. Historical DeepSeek totals without request times remain unknown."
   },
   "aliases": {
-    "gpt-5.6": "gpt-5.6-sol"
+    "gpt-5.6": "gpt-5.6-sol",
+    "deepseek-v4-flash": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    "deepseek-v4.1-flash": "deepseek-flash",
+    "deepseek-v4.1-flash-1017": "deepseek-flash",
+    "deepseek-v4-1-flash": "deepseek-flash",
+    "deepseek-v4-pro-0813": "deepseek-v4-pro"
   },
   "models": {
     "gpt-5": {
@@ -70,38 +72,62 @@
     "gpt-5.6-luna": {
       "input_per_million": 0.2,
       "cached_input_per_million": 0.02,
-      "output_per_million": 1.2
+      "output_per_million": 1.2,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "gpt-5.6-terra": {
       "input_per_million": 2.0,
       "cached_input_per_million": 0.2,
-      "output_per_million": 12.0
+      "output_per_million": 12.0,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "gpt-5.6-sol": {
       "input_per_million": 4.0,
       "cached_input_per_million": 0.4,
-      "output_per_million": 20.0
+      "output_per_million": 20.0,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "gpt-6-astra": {
       "input_per_million": 10.0,
       "cached_input_per_million": 1.0,
-      "output_per_million": 50.0
+      "output_per_million": 50.0,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "gpt-6-luna": {
       "input_per_million": 0.1,
       "cached_input_per_million": 0.01,
-      "output_per_million": 0.5
+      "output_per_million": 0.5,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "gpt-6-sol": {
       "input_per_million": 2.0,
       "cached_input_per_million": 0.2,
-      "output_per_million": 10.0
-    },
-    "codex-auto-review": {
-      "input_per_million": 1.5,
-      "cached_input_per_million": 0.375,
-      "output_per_million": 6.0,
-      "estimated": true
+      "output_per_million": 10.0,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
     },
     "claude-fable-5-1": {
       "input_per_million": 10.0,
@@ -161,7 +187,7 @@
     },
     "claude-sonnet-5-5": {
       "input_per_million": 2.0,
-      "cached_input_per_million": 0.2,
+      "cached_input_per_million": 0.1,
       "output_per_million": 10.0,
       "cache_write_5m_per_million": 2.5,
       "cache_write_1h_per_million": 4.0
@@ -185,7 +211,12 @@
       "cached_input_per_million": 0.01,
       "output_per_million": 0.5,
       "cache_write_5m_per_million": 0.125,
-      "cache_write_1h_per_million": 0.2
+      "cache_write_1h_per_million": 0.2,
+      "long_context": {
+        "above_input_tokens": 100000,
+        "input_multiplier": 5,
+        "output_multiplier": 5
+      }
     },
     "claude-haiku-4-5": {
       "input_per_million": 1.0,
@@ -193,6 +224,98 @@
       "output_per_million": 5.0,
       "cache_write_5m_per_million": 1.25,
       "cache_write_1h_per_million": 2.0
+    },
+    "gpt-6.1-sol": {
+      "input_per_million": 2,
+      "cached_input_per_million": 0.1,
+      "output_per_million": 10,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      },
+      "cache_write_30m_per_million": 2.5,
+      "cache_write_12h_per_million": 5
+    },
+    "deepseek-flash": {
+      "input_per_million": 0.15,
+      "cached_input_per_million": 0.003,
+      "output_per_million": 0.6,
+      "cache_write_5m_per_million": 0.15,
+      "cache_write_1h_per_million": 0.15,
+      "peak_schedule": "deepseek",
+      "peak_multiplier": 2
+    },
+    "deepseek-v4-pro": {
+      "input_per_million": 0.66,
+      "cached_input_per_million": 0.022,
+      "output_per_million": 1.98,
+      "cache_write_5m_per_million": 0.66,
+      "cache_write_1h_per_million": 0.66,
+      "peak_schedule": "deepseek",
+      "peak_multiplier": 2
+    },
+    "gpt-6.1-terra": {
+      "input_per_million": 1,
+      "cached_input_per_million": 0.05,
+      "output_per_million": 5,
+      "cache_write_30m_per_million": 1.25,
+      "cache_write_12h_per_million": 2.5,
+      "long_context": {
+        "above_input_tokens": 272000,
+        "input_multiplier": 2,
+        "output_multiplier": 1.5
+      }
+    }
+  },
+  "schedules": {
+    "deepseek": {
+      "utc_peak_hours": [
+        [
+          1,
+          4
+        ],
+        [
+          6,
+          10
+        ]
+      ],
+      "weekdays_only": true,
+      "holiday_timezone_offset_hours": 8,
+      "holiday_years": [
+        2026
+      ],
+      "holiday_ranges": [
+        [
+          "2026-01-01",
+          "2026-01-03"
+        ],
+        [
+          "2026-02-15",
+          "2026-02-23"
+        ],
+        [
+          "2026-04-04",
+          "2026-04-06"
+        ],
+        [
+          "2026-05-01",
+          "2026-05-05"
+        ],
+        [
+          "2026-06-19",
+          "2026-06-21"
+        ],
+        [
+          "2026-09-25",
+          "2026-09-27"
+        ],
+        [
+          "2026-10-01",
+          "2026-10-07"
+        ]
+      ],
+      "holiday_source": "https://www.gov.cn/zhengce/content/202511/content_7047090.htm"
     }
   }
 }

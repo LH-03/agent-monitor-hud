@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "product": "Agent Monitor HUD",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "repository": "https://github.com/LH-03/agent-monitor-hud",
-  "releaseTag": "v4.0.1",
+  "releaseTag": "v4.0.2",
   "checksumAsset": "SHA256SUMS.txt",
   "platforms": {
     "windows-x64": {

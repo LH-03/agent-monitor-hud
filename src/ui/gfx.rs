@@ -217,8 +217,10 @@ impl Gfx {
         let geometry: ID2D1PathGeometry = unsafe { self.d2d.CreatePathGeometry().ok()?.cast().ok()? };
         unsafe {
             let sink = geometry.Open().ok()?;
-            sink.SetFillMode(D2D1_FILL_MODE_ALTERNATE);
-            build_path(&sink, data);
+            let (winding, path) = if let Some(path) = data.strip_prefix("F1 ") { (true, path) }
+                else { (false, data.strip_prefix("F0 ").unwrap_or(data)) };
+            sink.SetFillMode(if winding { D2D1_FILL_MODE_WINDING } else { D2D1_FILL_MODE_ALTERNATE });
+            build_path(&sink, path);
             sink.Close().ok()?;
         }
         self.geometries.borrow_mut().insert(data.to_string(), geometry.clone());

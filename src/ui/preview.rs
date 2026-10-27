@@ -32,6 +32,12 @@ pub fn run(args: &[String]) -> i32 {
     let catalog = Catalog::load(Path::new("."));
     let now = time::parse_iso("2026-07-13T08:00:00Z").unwrap();
     let mut tasks: Vec<TaskView> = (1..=6).map(|i| synthetic(i, now)).collect();
+    if std::env::var("CODEX_MONITOR_HUD_PREVIEW_MIXED").is_ok() {
+        tasks[1].source = Source::Claude;
+        tasks[1].client = "claude-desktop";
+        tasks[2].source = Source::Dsh;
+        tasks[2].client = "dsh-desktop";
+    }
     if std::env::var("CODEX_MONITOR_HUD_PREVIEW_WAITING").is_ok() {
         tasks[1].status = "waiting";
     }
@@ -173,7 +179,7 @@ pub fn run(args: &[String]) -> i32 {
             let settings = Settings::from(&document);
             let zh = catalog.zh.clone();
             let ctx = hud::Ctx { s: &settings, loc: &zh, sloc: &zh, zh: &catalog.zh, en: &catalog.en, now, image_available: false };
-            let root = match mode {
+            let mut root = match mode {
                 "bubble" => hud::build_bubble(&ctx, &tasks[0], false, None),
                 "notice" => {
                     let mut t = tasks[2].clone();
@@ -222,6 +228,7 @@ pub fn run(args: &[String]) -> i32 {
                     hud::build_main(&ctx, &model, &mut actions)
                 }
             };
+            if settings.transparency_mode == "uniform" && mode != "notice" { root.opacity = settings.opacity as f32; }
             let path = out.join(format!("{mode}-{theme}.png"));
             if let Err(error) = render_png(&gfx, root, &path) {
                 eprintln!("{}: {error}", path.display());
@@ -246,6 +253,10 @@ pub(super) fn synthetic(i: u32, now: i64) -> TaskView {
         context_window: 200_000,
         context_percent: 25.0,
         cost_usd: Some(0.03),
+        average_tps: Some(48.6 + i as f64 * 7.3),
+        average_tps_samples: 5,
+        average_tps_at: now,
+        average_tps_basis: "output-window",
         weekly_remaining: Some(80.0),
         five_hour_remaining: Some(75.0),
         active_tasks: 1,
@@ -366,6 +377,49 @@ mod tests {
         }
         assert!(heights[0] <= 34.0, "compact keeps both identity lines with minimal padding: {heights:?}");
         assert!(heights[1] >= heights[0] + 6.0 && heights[2] >= heights[1] + 6.0, "spacing tiers must be distinct: {heights:?}");
+    }
+
+    #[test]
+    fn task_tooltips_keep_the_row_action_and_buttons_keep_their_own_actions() {
+        unsafe { let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); }
+        let gfx = Gfx::new().expect("native graphics");
+        let catalog = Catalog::load(Path::new("nonexistent-preview-locales"));
+        let task = synthetic(1, 1000);
+        let view = View { tasks: vec![task.clone()], display: task.snapshot.clone(), ..Default::default() };
+        fn tips<'a>(el: &'a El, out: &mut Vec<&'a El>) {
+            if el.id == 0 && el.tip.is_some() { out.push(el); }
+            for child in &el.children { tips(child, out); }
+        }
+        for style in ["rows", "cards", "rail"] {
+            for detail in ["compact", "detailed"] {
+                let mut doc = config::defaults();
+                doc["multiTask"]["listStyle"] = Value::from(style);
+                doc["multiTask"]["listDetail"] = Value::from(detail);
+                doc["behavior"]["openTaskOnDoubleClick"] = Value::from(true);
+                let settings = Settings::from(&doc);
+                let ctx = hud::Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
+                let mut actions = ActionMap::new();
+                let mut root = hud::build_main(&ctx, &MainModel { view: &view, detached: &HashSet::new(), list_visible: true, quiet: false, overall: "active", show_grip: false, spread: (0.0, 0.0) }, &mut actions);
+                layout_root(&mut root, (1600.0, f32::INFINITY), &LayoutCtx { gfx: &gfx, scale: 1.0 });
+                let row = find(&root, &|el| el.fx == hud::fx_key("row.surface:synthetic-1")).unwrap();
+                let mut targets = Vec::new();
+                tips(row, &mut targets);
+                assert!(targets.len() >= 4);
+                for target in targets {
+                    let hit = layout::hit(&root, target.rect.cx(), target.rect.cy()).unwrap();
+                    assert_eq!(actions.get(&hit.0), Some(&(task.key.clone(), hud::ROW_SURFACE)), "{style}/{detail}: tooltip must not swallow row navigation");
+                    assert_eq!(hit.1.as_deref(), target.tip.as_deref());
+                }
+                for action in [hud::ROW_ACTION, hud::ROW_DISMISS] {
+                    let id = hud::ROW_BASE + action;
+                    let button = layout::find(&root, id).unwrap();
+                    let hit = layout::hit(&root, button.rect.cx(), button.rect.cy()).unwrap();
+                    assert_eq!(hit.0, id);
+                }
+                let shell = layout::find(&root, hud::ID_SHELL).unwrap();
+                assert_eq!(layout::hit(&root, shell.rect.x + 1.0, shell.rect.cy()).unwrap().0, hud::ID_SHELL);
+            }
+        }
     }
 
     #[test]

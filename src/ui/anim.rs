@@ -121,14 +121,19 @@ impl Anim {
 }
 
 fn profile(s: &Settings, color: &str, opacity: f64, blur: f64) -> EffectProfile {
-    effect_profile(s, color, opacity, blur)
+    let mut p = effect_profile(s, color, opacity, blur);
+    let fade = super::style::role_opacity(super::style::Role::Decoration, s, "active", true);
+    p.color = p.color.scale_alpha(fade);
+    p.flow_core = p.flow_core.scale_alpha(fade);
+    p.flow_shoulder_alpha = (p.flow_shoulder_alpha as f64 * fade).round() as u8;
+    p
 }
 
 fn flow_stops(p: &EffectProfile) -> Vec<(f32, Color)> {
     let c = p.color;
     vec![
         (0.0, c.with_alpha(0)),
-        (0.40, c.with_alpha(0x22)),
+        (0.40, c.with_alpha((0x22 as f64 * c.a as f64 / 255.0).round() as u8)),
         (0.50, p.flow_core),
         (0.60, c.with_alpha(p.flow_shoulder_alpha)),
         (1.0, c.with_alpha(0)),

@@ -830,13 +830,19 @@ pub fn layout_root(root: &mut El, max: (f32, f32), ctx: &Ctx) -> (f32, f32) {
     size
 }
 
-/// Deepest element at (x, y) with a non-zero id; returns its id, tooltip and hand cursor flag.
+/// Deepest tooltip and nearest action owner at (x, y). Informational children
+/// retain their tooltip without replacing their parent row/button's action.
 pub fn hit(el: &El, x: f32, y: f32) -> Option<(u32, Option<String>, bool, Rect)> {
     if el.collapsed || !el.rect.contains(x, y) {
         return None;
     }
     for child in el.children.iter().rev() {
-        if let Some(found) = hit(child, x, y) {
+        if let Some(mut found) = hit(child, x, y) {
+            if found.0 == 0 && el.id != 0 {
+                found.0 = el.id;
+                found.2 |= el.hand;
+                found.3 = el.rect;
+            }
             return Some(found);
         }
     }

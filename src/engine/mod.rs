@@ -13,6 +13,7 @@ pub mod jsonl;
 pub mod ledger;
 pub mod notices;
 pub mod registry;
+pub mod speed;
 
 use crate::config::Settings;
 use crate::format;
@@ -43,6 +44,16 @@ pub enum Source {
 }
 
 impl Source {
+    /// The account being billed can differ from the task's client family.
+    pub fn quota_source(self, provider: &str, profile: &str) -> Option<Source> {
+        match self {
+            Source::Codex if profile == codex::DEEPSEEK_PROFILE || provider.eq_ignore_ascii_case("deepseek") => Some(Source::Dsh),
+            Source::Codex if provider.is_empty() || provider.eq_ignore_ascii_case("openai") => Some(Source::Codex),
+            Source::Codex => None,
+            source => Some(source),
+        }
+    }
+
     /// Stable family name used by the registry, MCP hosts and notices.
     pub fn agent_name(self) -> &'static str {
         match self {
@@ -90,6 +101,7 @@ pub struct Task {
     pub client: &'static str,
     pub provider: String,
     pub snapshot: Option<Snapshot>,
+    speed: speed::Tracker,
     pub stamp: FileStamp,
     pub last_usage_at: i64,
     pub last_activity_at: i64,
@@ -144,6 +156,7 @@ impl Task {
             client: "unknown",
             provider: String::new(),
             snapshot: None,
+            speed: speed::Tracker::default(),
             stamp,
             last_usage_at: MIN,
             last_activity_at: stamp.write_ms,
@@ -326,6 +339,7 @@ pub struct Engine {
     pub paused: bool,
     pub initial_scan_complete: bool,
     pub pricing: pricing::Catalog,
+    pub costs: pricing::CostBook,
     pub official_allowance: Option<allowance::Official>,
     last_full_scan: i64,
     last_activity_query: i64,
@@ -353,6 +367,7 @@ impl Engine {
             dsh_balance: None,
             dsh_balance_failure: None,
             ledger: ledger::Ledger::load(&paths.state_root, time::now_ms()),
+            costs: pricing::CostBook::load(&paths.state_root),
             paths,
             settings,
             profiles,
@@ -406,9 +421,6 @@ impl Engine {
                     task.attention_reason = "";
                     task.attention_until = MIN;
                 }
-            }
-            if let Some(snapshot) = task.snapshot.as_mut() {
-                snapshot.cost_usd = self.pricing.estimate(snapshot);
             }
         }
         self.revision += 1;
@@ -563,7 +575,7 @@ impl Engine {
 
     /// Whether DeepSeek Harness was used recently (balance polls more often then).
     pub fn dsh_recently_active(&self, now: i64) -> bool {
-        self.tasks.values().any(|t| t.source == Source::Dsh && now - t.activity_reference() <= 60 * 60 * 1000)
+        self.tasks.values().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(Source::Dsh) && now - t.activity_reference() <= 2 * 60 * 1000)
     }
 
     fn account_view(&self, now: i64) -> AccountView {
@@ -691,7 +703,7 @@ impl Engine {
         true
     }
 
-    fn init_codex(&self, task: &mut Task, now: i64) {
+    fn init_codex(&mut self, task: &mut Task, now: i64) {
         let profile = self.profiles.iter().find(|p| p.id == task.profile).cloned();
         let identity = codex::read_identity(&task.path);
         task.read_blocked = fsx::is_read_blocked(&task.path);
@@ -728,12 +740,13 @@ impl Engine {
                 task.weekly = h.weekly;
                 task.five_hour = h.five_hour;
                 task.turn_open = h.turn_open;
+                task.speed = speed::hydrate_codex(&task.path, &task.model, now);
                 if let Some(usage) = &h.usage {
                     let mut snapshot = usage.to_snapshot();
                     snapshot.model = task.model.clone();
                     snapshot.workspace = task.workspace.clone();
                     apply_allowance(&mut snapshot, task.weekly, task.five_hour);
-                    snapshot.cost_usd = self.pricing.estimate(&snapshot);
+                    snapshot.cost_usd = self.costs.observe(&task.key, &snapshot, &self.pricing);
                     task.last_usage_at = snapshot.timestamp;
                     task.snapshot = Some(snapshot);
                     task.observed_activity = true;
@@ -769,7 +782,7 @@ impl Engine {
         task.reader = jsonl::IncrementalReader::default();
     }
 
-    fn init_dsh(&self, task: &mut Task, now: i64) {
+    fn init_dsh(&mut self, task: &mut Task, now: i64) {
         task.client = "dsh-desktop";
         task.provider = "deepseek".into();
         let Some(projection) = dsh::read(&task.path) else {
@@ -777,9 +790,11 @@ impl Engine {
             return;
         };
         apply_dsh_identity(task, &projection, &self.dsh_archived);
+        task.speed.dsh(&projection, projection.last_message_at);
+        task.speed.refresh(now);
         let at = if projection.last_message_at > 0 { projection.last_message_at } else { task.stamp.write_ms };
         if let Some(mut snapshot) = projection.snapshot(at) {
-            snapshot.cost_usd = self.pricing.estimate(&snapshot);
+            snapshot.cost_usd = self.costs.observe(&task.key, &snapshot, &self.pricing);
             task.snapshot = Some(snapshot);
             task.last_usage_at = at;
             task.observed_activity = true;
@@ -823,9 +838,11 @@ impl Engine {
             return true;
         };
         apply_dsh_identity(task, &next, &self.dsh_archived);
+        task.speed.dsh(&next, next.last_message_at);
+        task.speed.refresh(now);
         if next.totals != previous.totals || next.last != previous.last || task.snapshot.is_none() {
-            if let Some(mut snapshot) = next.snapshot(now) {
-                snapshot.cost_usd = self.pricing.estimate(&snapshot);
+            if let Some(mut snapshot) = next.snapshot(if next.last_message_at > 0 { next.last_message_at } else { stamp.write_ms }) {
+                snapshot.cost_usd = self.costs.observe(&task.key, &snapshot, &self.pricing);
                 task.snapshot = Some(snapshot);
                 task.last_usage_at = now;
                 task.last_read_error_at = MIN;
@@ -931,6 +948,7 @@ impl Engine {
             Source::Codex => {
                 if restarted {
                     task.snapshot = None;
+                    task.speed = speed::Tracker::default();
                 }
                 for line in &records {
                     if !task.identity_found {
@@ -953,8 +971,9 @@ impl Engine {
                             }
                         }
                     }
+                    if let Some(event) = speed::codex_event(line) { task.speed.observe(event); }
                     if let Some(record) = codex::parse_record(line, now) {
-                        changed |= apply_codex(task, record, now, settings, &self.pricing, &mut self.attention_seq);
+                        changed |= apply_codex(task, record, now, settings, &self.pricing, &mut self.costs, &mut self.attention_seq);
                         if task.last_usage_at == now {
                             self.last_usage_at = now;
                         }
@@ -971,12 +990,13 @@ impl Engine {
                     task.hydrating = true;
                     task.hydrate_until = stamp.size;
                 }
+                if restarted { task.speed = speed::Tracker::default(); }
                 let mut saw_usage = false;
                 let mut saw_prompt = false;
                 let mut saw_end = false;
                 let mut identity = false;
                 for line in &records {
-                    match state.apply_line(line, now) {
+                    match state.apply_line(line, now, &self.pricing) {
                         claude::Change::Usage => saw_usage = true,
                         claude::Change::Prompt => {
                             saw_prompt = true;
@@ -1009,8 +1029,7 @@ impl Engine {
                     task.hydrating = false;
                 }
                 if saw_usage || was_hydrating {
-                    if let Some(mut snapshot) = state.snapshot() {
-                        snapshot.cost_usd = self.pricing.estimate(&snapshot);
+                    if let Some(snapshot) = state.snapshot() {
                         task.snapshot = Some(snapshot);
                         task.observed_activity = true;
                         changed = true;
@@ -1215,6 +1234,8 @@ impl Engine {
                     set_attention(task, "settled", now, &settings, &mut self.attention_seq);
                 }
             }
+            task.speed.refresh(now);
+            if let Some(state)=task.claude.as_mut() { state.speed.refresh(now); }
             task.last_rendered_status = next;
             changed |= update_exit(task, now, &settings, hold);
         }
@@ -1368,7 +1389,13 @@ impl Engine {
                     },
                     started_at: t.started_at,
                     status: self.status(t, now),
-                    snapshot: t.snapshot.clone(),
+                    snapshot: t.snapshot.as_ref().map(|s| {
+                        let mut s=s.clone();
+                        let speed=t.claude.as_ref().map(|state|&state.speed).unwrap_or(&t.speed).reading(self.status(t,now));
+                        s.average_tps=speed.value;s.average_tps_samples=speed.samples;
+                        s.average_tps_at=speed.at;s.average_tps_basis=speed.basis;
+                        s
+                    }),
                     last_usage_at: t.last_usage_at,
                     last_write_at: t.stamp.write_ms,
                     attention_revision: t.attention_revision,
@@ -1508,11 +1535,11 @@ fn resolve_client(value: &str, profile: Option<&codex::Profile>) -> &'static str
     }
 }
 
-/// Only OpenAI Codex readings contribute; the signed-in official reading wins.
+/// Account-level windows use the newest observation, independently per window.
 fn codex_allowance<'a>(tasks: impl Iterator<Item = &'a Task>, official: Option<&allowance::Official>) -> (Option<f64>, Option<f64>, Option<i64>) {
     let mut weekly = None;
     let mut five = None;
-    for task in tasks.filter(|t| t.source == Source::Codex && t.profile != codex::DEEPSEEK_PROFILE && matches!(t.provider.as_str(), "" | "openai")) {
+    for task in tasks.filter(|t| t.source.quota_source(&t.provider, t.profile) == Some(Source::Codex)) {
         if let Some(value) = task.weekly {
             if weekly.is_none_or(|(_, at)| value.1 > at) {
                 weekly = Some(value);
@@ -1525,8 +1552,12 @@ fn codex_allowance<'a>(tasks: impl Iterator<Item = &'a Task>, official: Option<&
         }
     }
     if let Some(official) = official {
-        weekly = official.weekly.map(|v| (v, official.at)).or(weekly);
-        five = official.five_hour.map(|v| (v, official.at)).or(five);
+        if let Some(value) = official.weekly.filter(|_| weekly.is_none_or(|(_, at)| official.at >= at)) {
+            weekly = Some((value, official.at));
+        }
+        if let Some(value) = official.five_hour.filter(|_| five.is_none_or(|(_, at)| official.at >= at)) {
+            five = Some((value, official.at));
+        }
     }
     (five.map(|f| f.0), weekly.map(|w| w.0), weekly.map(|w| w.1).max(five.map(|f| f.1)))
 }
@@ -1589,6 +1620,13 @@ mod account_tests {
 
         let official = allowance::Official { at: 3000, five_hour: None, weekly: Some(55.0) };
         assert_eq!(codex_allowance(tasks.into_iter(), Some(&official)), (Some(60.0), Some(55.0), Some(3000)));
+        // A previous official poll must not pin later live usage or a reset.
+        let stale = allowance::Official { at: 1500, five_hour: Some(100.0), weekly: Some(65.0) };
+        assert_eq!(codex_allowance(tasks.into_iter(), Some(&stale)), (Some(60.0), Some(65.0), Some(2000)));
+        let mut reset = task();
+        reset.five_hour = Some((100.0, 4000));
+        reset.weekly = Some((100.0, 4000));
+        assert_eq!(codex_allowance([&reset].into_iter(), Some(&official)), (Some(100.0), Some(100.0), Some(4000)));
         assert_eq!(codex_allowance(std::iter::empty(), Some(&official)), (None, Some(55.0), Some(3000)));
         assert_eq!(codex_allowance(std::iter::empty(), None), (None, None, None));
     }
@@ -1600,13 +1638,14 @@ fn apply_allowance(snapshot: &mut Snapshot, weekly: Option<(f64, i64)>, five: Op
     snapshot.allowance_at = weekly.map(|w| w.1).max(five.map(|f| f.1));
 }
 
-fn apply_codex(task: &mut Task, record: codex::Record, now: i64, settings: &Settings, pricing: &pricing::Catalog, seq: &mut u32) -> bool {
+fn apply_codex(task: &mut Task, record: codex::Record, now: i64, settings: &Settings, pricing: &pricing::Catalog, costs: &mut pricing::CostBook, seq: &mut u32) -> bool {
     match record {
         codex::Record::Context { model, workspace } => {
             task.model = model;
             task.workspace = workspace;
         }
         codex::Record::Started { turn_id } => {
+            task.speed.boundary();
             task.active_turn = turn_id;
             task.turn_open = true;
             task.clear_pending();
@@ -1656,7 +1695,7 @@ fn apply_codex(task: &mut Task, record: codex::Record, now: i64, settings: &Sett
             snapshot.model = task.model.clone();
             snapshot.workspace = task.workspace.clone();
             apply_allowance(&mut snapshot, task.weekly, task.five_hour);
-            snapshot.cost_usd = pricing.estimate(&snapshot);
+            snapshot.cost_usd = costs.observe(&task.key, &snapshot, pricing);
             task.snapshot = Some(snapshot);
             task.last_usage_at = now;
             task.last_read_error_at = MIN;

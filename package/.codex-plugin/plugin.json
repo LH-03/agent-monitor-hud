@@ -1,6 +1,6 @@
 {
     "name":  "codex-monitor-hud",
-    "version":  "4.0.1",
+    "version":  "4.0.2",
     "description":  "A native local real-time multi-task HUD for Codex, Claude Code and DeepSeek Harness on Windows.",
     "author":  {
                    "name":  "Agent Monitor HUD Contributors"

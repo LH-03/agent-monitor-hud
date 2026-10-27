@@ -131,8 +131,7 @@ impl SettingsWindow {
             || self.tip.hwnd == hwnd
     }
 
-    /// Re-renders the HUD for a live preview and keeps this window above it
-    /// (the HUD re-asserts topmost on every repaint).
+    /// Re-renders the HUD preview and preserves dialog/popup ordering.
     fn render_app(&self, app: &mut App) {
         app.render();
         self.raise();
@@ -140,13 +139,13 @@ impl SettingsWindow {
 
     pub fn raise(&self) {
         if self.surface.visible {
-            self.surface.set_topmost(true);
+            self.surface.raise();
         }
         if let Some(popup) = self.popup.as_ref() {
-            popup.surface.set_topmost(true);
+            popup.surface.raise();
         }
         if let Some(picker) = self.picker.as_ref() {
-            picker.surface.set_topmost(true);
+            picker.surface.raise();
         }
     }
 

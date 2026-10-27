@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.1.0 - TPS accuracy and DeepSeek session statistics
+
+- Show DeepSeek Harness's own whole-session TPS with the same rounding as its
+  interface, including during tool calls and after model switches. Updates
+  follow its local projection checkpoints.
+- Improve Codex TPS estimates by merging overlapping model-output windows and
+  including the time spent generating tool-call arguments, without counting
+  tool execution.
+- Clarify the different source calculations and show unavailable values when
+  the necessary data is missing. These readings are not token-by-token speed.
+
 ## 4.0.2 - Source icons, usage and window fixes
 
 - Use official source marks for Codex Desktop, VS Code, Claude Code and DeepSeek

@@ -65,9 +65,7 @@ pub struct Projection {
     pub last_message_at: i64,
     pub last_prompt_at: i64,
     pub decode_tokens: Option<i64>,
-    pub decode_ms: Option<i64>,
-    pub decode_steps: usize,
-    pub tools_running: bool,
+    pub decode_ms: Option<f64>,
 }
 
 impl Projection {
@@ -150,9 +148,7 @@ pub fn parse(text: &str, fallback_id: &str) -> Option<Projection> {
         last_message_at: row(rows, "timeContext").and_then(|t| t.get("lastMessageTime")).and_then(Value::as_i64).unwrap_or(0),
         last_prompt_at: row(rows, "sessionListMetadata").and_then(|m| m.get("lastPromptAt")).and_then(Value::as_i64).unwrap_or(0),
         decode_tokens: stats.and_then(|v|v.get("decodeTokens")).and_then(Value::as_i64),
-        decode_ms: stats.and_then(|v|v.get("decodeMs")).and_then(Value::as_i64),
-        decode_steps: stats.and_then(|v|v.get("ttftSteps")).and_then(Value::as_u64).unwrap_or(0) as usize,
-        tools_running: stats.and_then(|v|v.get("pendingCalls")).and_then(Value::as_object).is_some_and(|v|!v.is_empty()),
+        decode_ms: stats.and_then(|v|v.get("decodeMs")).and_then(Value::as_f64),
     })
 }
 

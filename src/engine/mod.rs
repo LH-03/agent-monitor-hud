@@ -790,7 +790,7 @@ impl Engine {
             return;
         };
         apply_dsh_identity(task, &projection, &self.dsh_archived);
-        task.speed.dsh(&projection, projection.last_message_at);
+        task.speed.dsh(&projection, task.stamp.write_ms);
         task.speed.refresh(now);
         let at = if projection.last_message_at > 0 { projection.last_message_at } else { task.stamp.write_ms };
         if let Some(mut snapshot) = projection.snapshot(at) {
@@ -838,7 +838,7 @@ impl Engine {
             return true;
         };
         apply_dsh_identity(task, &next, &self.dsh_archived);
-        task.speed.dsh(&next, next.last_message_at);
+        task.speed.dsh(&next, stamp.write_ms);
         task.speed.refresh(now);
         if next.totals != previous.totals || next.last != previous.last || task.snapshot.is_none() {
             if let Some(mut snapshot) = next.snapshot(if next.last_message_at > 0 { next.last_message_at } else { stamp.write_ms }) {

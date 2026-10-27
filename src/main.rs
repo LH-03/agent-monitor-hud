@@ -50,12 +50,12 @@ fn speed_check(source: &str, path: &str, as_of: Option<i64>) -> i32 {
         "claude"=>engine::speed::hydrate_claude(path,now),
         "dsh"=> {
             let Some(p)=engine::dsh::read(path) else { return 2 };
-            let mut t=engine::speed::Tracker::default();t.dsh(&p,p.last_message_at);t.refresh(now);t
+            let mut t=engine::speed::Tracker::default();t.dsh(&p,util::fsx::stamp(path).map(|s|s.write_ms).unwrap_or(p.last_message_at));t.refresh(now);t
         },
         _=>return 2,
     };
     let measured=tracker.raw();let active=tracker.reading("active");
-    let doc=serde_json::json!({"as_of":now,"source":source,"average_tps":measured.value,"samples":measured.samples,"sample_at":measured.at,"basis":measured.basis,"active_display_tps":active.value,"idle_display_tps":tracker.reading("idle").value,"refresh_seconds":30});
+    let doc=serde_json::json!({"as_of":now,"source":source,"average_tps":measured.value,"samples":if source=="dsh" { None } else { Some(measured.samples) },"sample_at":measured.at,"basis":measured.basis,"active_display_tps":active.value,"idle_display_tps":tracker.reading("idle").value,"refresh_seconds":if source=="dsh" { None } else { Some(30) }});
     use std::io::Write;
     let _=writeln!(std::io::stdout().lock(),"{doc}");0
 }

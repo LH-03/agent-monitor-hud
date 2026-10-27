@@ -476,10 +476,10 @@
   "dshBalanceUnexpected": "DeepSeek returned something unexpected",
   "mainSizeSpread": "Across {0}% · Down {1}%",
   "averageTps": "TPS",
-  "averageTpsHint": "Updates every 30 seconds; the first valid sample appears immediately. Tools, waiting and idle show 0. Missing matched token/timing data shows --. Hover task information for the source basis.",
-  "averageTpsCodex": "Codex: up to 5 valid responses in the last 5 minutes; output tokens / model output time, including reasoning and excluding tool execution.",
+  "averageTpsHint": "Codex and CC update every 30 seconds and show 0 during tools, waiting and idle. DSH follows its own session statistic as local records update. Missing data shows --.",
+  "averageTpsCodex": "Codex: up to 5 responses in 5 minutes; output tokens / observed model output time, including reasoning and generated tool arguments but excluding tool execution. Not live speed.",
   "averageTpsClaude": "Claude Code: up to 5 requests in the last 5 minutes; output tokens / API request time, including first-token wait and excluding tools between requests.",
-  "averageTpsDsh": "DeepSeek Harness: native session decodeTokens / decodeMs, excluding first-token wait and tool execution.",
+  "averageTpsDsh": "DeepSeek Harness: the app's whole-session decode statistic, excluding first-token wait and tool time. It stays visible during tools and idle; it is not live speed.",
   "averageTpsUnavailable": "No matched output-token and model-timing samples yet. Whole-task time is never substituted.",
   "averageTpsSamples": "Samples"
 }

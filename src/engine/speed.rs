@@ -15,10 +15,8 @@ pub struct Tracker {
     samples: VecDeque<Sample>,
     requests: HashMap<String, i64>,
     tools: HashSet<String>,
-    start: Option<i64>,
-    end: i64,
+    windows: Vec<(i64, i64)>,
     native: Option<Reading>,
-    native_origin: Option<(i64,i64,usize)>,
     published: Reading,
     refreshed: i64,
     basis: &'static str,
@@ -33,7 +31,7 @@ pub enum Event {
     Model(String),
     Span { start: i64, end: i64 },
     Commit { id: String, tokens: i64, at: i64 },
-    Tool { id: String, running: bool },
+    Tool { id: String, running: bool, at: Option<i64> },
 }
 
 /// Read only typed identity, timing, usage and tool-boundary metadata.
@@ -62,7 +60,7 @@ pub fn codex_event(line: &[u8]) -> Option<Event> {
             let running=matches!(kind,"function_call"|"custom_tool_call"|"local_shell_call");
             if !running && !matches!(kind,"function_call_output"|"custom_tool_call_output"|"local_shell_call_output") { return None; }
             let id=s(p,"call_id");
-            (!id.is_empty()).then(|| Event::Tool { id:id.into(),running })
+            (!id.is_empty() || (running && at(&r).is_some())).then(|| Event::Tool { id:id.into(),running,at:at(&r) })
         }
         _ => None,
     }
@@ -73,27 +71,47 @@ impl Tracker {
         if model.is_empty() || self.model == model { return; }
         self.model=model.into(); self.samples.clear(); self.native=None;
         self.published=Reading::default(); self.refreshed=0;
-        self.start=None; self.end=0;
+        self.windows.clear();
     }
-    pub fn boundary(&mut self) { self.tools.clear();self.start=None;self.end=0; }
+    pub fn boundary(&mut self) { self.tools.clear();self.windows.clear(); }
     pub fn tool(&mut self, id: &str, running: bool) {
         if running { self.tools.insert(id.into()); } else { self.tools.remove(id); }
     }
     pub fn observe(&mut self, event: Event) {
         match event {
             Event::Model(m) => self.model(&m),
-            Event::Tool{id,running} => self.tool(&id,running),
+            Event::Tool{id,running,at} => {
+                if running {
+                    // A completed model-generated tool call is persisted before
+                    // execution. Include the time spent generating its arguments.
+                    if let (Some(at),Some(end))=(at,self.windows.iter().map(|w|w.1).max()) {
+                        if at>end { self.add_window(end,at); }
+                    }
+                }
+                if !id.is_empty() { self.tool(&id,running); }
+            },
             Event::Span{start,end} if start>0 && end>=start => {
-                self.start=Some(self.start.map_or(start,|s|s.min(start))); self.end=self.end.max(end);
+                self.add_window(start,end);
             }
             Event::Commit{id,tokens,at} => {
-                if let Some(start)=self.start.take() {
-                    self.add(&id,tokens,self.end-start,at,"output-window");
-                }
-                self.end=0;
+                let ms=self.windows.iter().map(|(start,end)|end-start).sum();
+                self.windows.clear();
+                self.add(&id,tokens,ms,at,"output-window");
             }
             _ => {}
         }
+    }
+    /// Keep the union of output windows so overlaps are not double-counted and
+    /// gaps between independent windows do not become model time.
+    fn add_window(&mut self, mut start: i64, mut end: i64) {
+        let mut i=0;
+        while i<self.windows.len() {
+            let (a,b)=self.windows[i];
+            if end<a || b<start { i+=1; } else {
+                start=start.min(a);end=end.max(b);self.windows.swap_remove(i);
+            }
+        }
+        self.windows.push((start,end));
     }
     fn add(&mut self, id: &str, tokens: i64, ms: i64, at: i64, basis: &'static str) {
         if tokens<=0 || ms<500 { return; }
@@ -139,26 +157,26 @@ impl Tracker {
         }
     }
     pub fn dsh(&mut self, p: &super::dsh::Projection, at: i64) {
-        if !self.model.is_empty() && self.model!=p.model {
-            self.native_origin=p.decode_tokens.zip(p.decode_ms).map(|(t,m)|(t,m,p.decode_steps));
-        }
         self.model(&p.model);
-        self.tool("projection",p.tools_running);
-        self.native=match (p.decode_tokens,p.decode_ms) {
-            (Some(tokens),Some(ms)) => {
-                let (base_t,base_ms,base_n)=self.native_origin.unwrap_or_default();
-                let (tokens,ms)=(tokens-base_t,ms-base_ms);
-                (tokens>0 && ms>=500).then(|| Reading { value:Some(tokens as f64*1000.0/ms as f64),samples:p.decode_steps.saturating_sub(base_n),at,basis:"decode" })
-            },
+        // Match the Harness session-statistics pill: its entire session's
+        // decode totals, even while a tool is running or after a model switch.
+        let value=match (p.decode_tokens,p.decode_ms) {
+            (Some(tokens),Some(ms)) if tokens>=0 && ms>0.0 => Some(tokens as f64*1000.0/ms),
             _ => None,
         };
+        // DSH exposes the number of TTFT observations, not the number of
+        // decode samples; don't present that unrelated count as TPS samples.
+        let reading=Reading { value,samples:0,at,basis:"decode" };
+        self.native=Some(reading);
+        self.published=reading;
     }
     /// The first valid sample appears immediately; subsequent numerical updates
     /// are coalesced to 30 s. Phase/status zeroing is independent of this timer.
     pub fn refresh(&mut self, now: i64) {
+        if let Some(native)=self.native { self.published=native; return; }
         if self.published.value.is_some() && now-self.refreshed<REFRESH_MS { return; }
         self.samples.retain(|s|now-s.at<WINDOW_MS);
-        self.published=if let Some(native)=self.native { native } else {
+        self.published={
             let ms:i64=self.samples.iter().map(|s|s.ms).sum();
             let tokens:i64=self.samples.iter().map(|s|s.tokens).sum();
             Reading { value:(ms>0).then(|| tokens as f64*1000.0/ms as f64),samples:self.samples.len(),at:self.samples.back().map(|s|s.at).unwrap_or(0),basis:self.basis }
@@ -166,7 +184,7 @@ impl Tracker {
         self.refreshed=now;
     }
     pub fn reading(&self, status: &str) -> Reading {
-        if status!="active" || !self.tools.is_empty() { Reading {value:Some(0.0),..self.published} } else { self.published }
+        if self.native.is_none() && (status!="active" || !self.tools.is_empty()) { Reading {value:Some(0.0),..self.published} } else { self.published }
     }
     pub fn raw(&self) -> Reading { self.published }
 }
@@ -226,6 +244,20 @@ mod tests {
         assert!(codex_event(br#"{"type":"response_item","payload":{"type":"message","content":[{"text":"private"}]}}"#).is_none());
     }
     #[test]
+    fn codex_counts_tool_arguments_but_not_tool_execution() {
+        let mut t=Tracker::default();
+        t.observe(Event::Span{start:1000,end:2000});
+        t.observe(Event::Span{start:1500,end:2500}); // overlapping model windows
+        t.observe(Event::Span{start:3500,end:4000}); // separate model window
+        t.observe(Event::Tool{id:"call".into(),running:true,at:Some(7000)});
+        t.observe(Event::Tool{id:"call".into(),running:false,at:Some(17000)});
+        t.observe(Event::Commit{id:"response".into(),tokens:1000,at:18000});
+        t.refresh(18001);
+        assert_eq!(t.raw().value,Some(200.0)); // 5 s output; 10 s tool excluded
+        let event=codex_event(br#"{"timestamp":"2026-10-27T01:00:05Z","type":"response_item","payload":{"type":"function_call","call_id":"call"}}"#).unwrap();
+        assert!(matches!(event,Event::Tool{running:true,at:Some(_),..}));
+    }
+    #[test]
     fn claude_matches_request_refs_and_deduplicates_content_blocks() {
         let mut t=Tracker::default();
         t.claude_line(br#"{"type":"api-request","id":"r1","timestamp":"2026-10-27T01:00:00Z"}"#);
@@ -238,13 +270,16 @@ mod tests {
         assert_eq!(t.reading("active").value,Some(50.0));
     }
     #[test]
-    fn dsh_uses_native_decode_time_and_resets_at_model_switch() {
-        let mut p=super::super::dsh::Projection {model:"deepseek-flash".into(),decode_tokens:Some(1000),decode_ms:Some(5000),decode_steps:3,..Default::default()};
+    fn dsh_matches_harness_session_totals_across_phases_and_model_changes() {
+        let mut p=super::super::dsh::Projection {model:"deepseek-flash".into(),decode_tokens:Some(1000),decode_ms:Some(5000.0),..Default::default()};
         let mut t=Tracker::default();t.dsh(&p,1000);t.refresh(1001);
         assert_eq!(t.raw().value,Some(200.0));assert_eq!(t.raw().basis,"decode");
-        p.model="deepseek-v4-pro".into();t.dsh(&p,2000);t.refresh(2001);assert_eq!(t.raw().value,None);
-        p.decode_tokens=Some(1100);p.decode_ms=Some(6000);p.decode_steps=4;
-        t.dsh(&p,3000);t.refresh(3001);assert_eq!(t.raw().value,Some(100.0));assert_eq!(t.raw().samples,1);
-        p.tools_running=true;t.dsh(&p,4000);assert_eq!(t.reading("active").value,Some(0.0));
+        p.model="deepseek-v4-pro".into();t.dsh(&p,2000);t.refresh(2001);assert_eq!(t.raw().value,Some(200.0));
+        p.decode_tokens=Some(1200);p.decode_ms=Some(6000.0);
+        t.dsh(&p,3000);t.refresh(3001);assert_eq!(t.raw().value,Some(200.0));assert_eq!(t.raw().samples,0);
+        t.tool("pending",true);
+        p.decode_tokens=Some(1500);t.dsh(&p,4000);t.refresh(4001);
+        assert_eq!(t.reading("active").value,Some(250.0));assert_eq!(t.reading("waiting").value,Some(250.0));
+        p.decode_ms=Some(0.0);t.dsh(&p,5000);t.refresh(5001);assert_eq!(t.reading("idle").value,None);
     }
 }

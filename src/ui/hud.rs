@@ -318,8 +318,12 @@ pub fn task_metrics_text(t: &TaskView, c: &Ctx, list: bool) -> String {
 }
 
 fn average_tps_text(t: &TaskView, c: &Ctx) -> String {
-    let value=if t.status!="active" { Some(0.0) } else { t.snapshot.as_ref().and_then(|s|s.average_tps) };
-    let number=value.map(|v|if v==0.0 { "0".into() } else { format!("{v:.1}") }).unwrap_or_else(||"--".into());
+    let dsh=t.source==Source::Dsh;
+    let value=if !dsh && t.status!="active" { Some(0.0) } else { t.snapshot.as_ref().and_then(|s|s.average_tps) };
+    let number=value.map(|v| if dsh {
+        // Harness rounds to whole tokens at 10 TPS and above, otherwise one decimal.
+        if v>=10.0 { format!("{}",v.round() as i64) } else { ((v*10.0).round()/10.0).to_string() }
+    } else if v==0.0 { "0".into() } else { format!("{v:.1}") }).unwrap_or_else(||"--".into());
     format!("{} {number}",c.loc.get("averageTps"))
 }
 fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
@@ -328,8 +332,8 @@ fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
     let mut text=c.sloc.get(key).to_string();
     if s.average_tps_samples>0 {
         text.push_str(&format!(" · {}: {}",c.sloc.get("averageTpsSamples"),s.average_tps_samples));
-        if s.average_tps_at>0 { text.push_str(&format!(" · {}",time::local_hms(s.average_tps_at))); }
     }
+    if s.average_tps_at>0 { text.push_str(&format!(" · {}",time::local_hms(s.average_tps_at))); }
     text
 }
 
@@ -1346,6 +1350,15 @@ mod quota_tests {
             assert!(!check(&doc,&task,list).contains("TPS"));
             doc["multiTask"]["showAverageTps"]=serde_json::json!(true);
         }
+        task.source=Source::Dsh;
+        task.status="waiting";
+        task.snapshot.as_mut().unwrap().average_tps=Some(236.7);
+        for list in [true,false] { assert!(check(&doc,&task,list).contains("TPS 237")); }
+        task.status="idle";
+        task.snapshot.as_mut().unwrap().average_tps=Some(7.46);
+        assert!(check(&doc,&task,true).contains("TPS 7.5"));
+        task.snapshot.as_mut().unwrap().average_tps=None;
+        assert!(check(&doc,&task,true).contains("TPS --"));
     }
 
     #[test]

@@ -476,10 +476,10 @@
   "dshBalanceUnexpected": "DeepSeek 返回了无法识别的内容",
   "mainSizeSpread": "横向 {0}% · 纵向 {1}%",
   "averageTps": "TPS",
-  "averageTpsHint": "每 30 秒更新，首个有效样本立即显示。工具执行、等待与空闲显示 0；缺少可匹配的输出计数或时间显示 --。悬停任务信息查看来源口径。",
-  "averageTpsCodex": "Codex：最近 5 分钟内最多 5 个有效响应的输出 token ÷ 模型输出时间，包含推理，不含工具执行。",
+  "averageTpsHint": "Codex 和 CC 每 30 秒更新，工具执行、等待与空闲显示 0；DSH 显示应用自身的会话统计，随本地记录更新。缺少有效数据显示 --。",
+  "averageTpsCodex": "Codex：最近 5 分钟内最多 5 个有效响应的输出 token ÷ 可观测的模型输出时间，包含推理与工具调用参数，不含工具执行；不是实时测速。",
   "averageTpsClaude": "Claude Code：最近 5 分钟内最多 5 个请求的输出 token ÷ 请求时间，含首字等待，不含请求间的工具执行。",
-  "averageTpsDsh": "DeepSeek Harness：原生会话累计 decodeTokens ÷ decodeMs，不含首字等待与工具执行。",
+  "averageTpsDsh": "DeepSeek Harness：与应用内一致的全会话解码统计，不含首字等待与工具耗时；会在工具执行和空闲时保留，不是实时速度。",
   "averageTpsUnavailable": "尚无可匹配的输出 token 与模型时间样本；不使用任务总耗时估算。",
   "averageTpsSamples": "样本"
 }

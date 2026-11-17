@@ -9,6 +9,7 @@ pub mod morph;
 pub mod paint;
 pub mod preview;
 pub mod settings;
+pub mod shape;
 pub mod style;
 pub mod surface;
 mod window_layer;

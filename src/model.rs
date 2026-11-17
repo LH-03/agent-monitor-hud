@@ -5,8 +5,8 @@
 /// Accounting rules (both sources map into these fields):
 /// - `input` is the total prompt size of the latest call; `cached` is the part
 ///   served from cache and `uncached = input - cached`.
-/// - Claude's cache-creation tokens are part of `uncached` (they were not read
-///   from cache); they are tracked separately only for pricing.
+/// - Cache-write tokens are part of `uncached` (they were not read from cache);
+///   they are tracked separately only for pricing.
 /// - `call_total = input + output`; reasoning is already inside `output`.
 /// - `task_*` are cumulative per conversation as reported (Codex) or summed
 ///   from de-duplicated responses (Claude).
@@ -24,6 +24,8 @@ pub struct Snapshot {
     pub task_output: i64,
     pub task_cache_write_5m: i64,
     pub task_cache_write_1h: i64,
+    /// Codex reports write tokens without their TTL; priced at the default 30m rate.
+    pub task_cache_write_30m: i64,
     pub call_total: i64,
     pub task_total: i64,
     pub context_percent: f64,

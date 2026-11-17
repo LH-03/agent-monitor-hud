@@ -28,6 +28,7 @@ pub enum Command {
     /// The stored DeepSeek key changed: re-read the balance now.
     DshKeyChanged,
     DshBalance(Result<engine::dsh_balance::Balance, engine::dsh_balance::Failure>),
+    ClaudeQuota(Result<engine::claude_quota::PlanUsage, engine::claude_quota::Failure>),
     Quit,
 }
 
@@ -76,7 +77,7 @@ pub fn spawn(paths: HudPaths, settings: Settings, catalog: Catalog, notify: impl
                 // files) must not wake the engine.
                 let paths: Vec<PathBuf> = paths
                     .into_iter()
-                    .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json")))
+                    .filter(|p| p.is_dir() || p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json")))
                     .collect();
                 if paths.is_empty() {
                     return;
@@ -99,6 +100,8 @@ pub fn spawn(paths: HudPaths, settings: Settings, catalog: Catalog, notify: impl
 
 fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sender<Command>, shared: Arc<Shared>, notify: impl Fn()) {
     let paths = engine.paths.clone();
+    let mut claude_login_paths: Vec<PathBuf> = engine::claude_quota::candidates(&paths.home).into_iter().filter_map(|p| p.parent().map(|p| p.join("config.json"))).collect();
+    claude_login_paths.push(paths.claude_root.join(".credentials.json"));
     let notifications_dir = paths.notifications_dir();
     let events_dir = paths.claude_state_dir().join("events");
     let _ = std::fs::create_dir_all(&notifications_dir);
@@ -115,6 +118,13 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
     let mut balance_running = false;
     let mut balance_next = time::now_ms() + 3_000;
     let mut balance_last = time::MIN;
+    let mut balance_retry_after = time::MIN;
+    let mut claude_running = false;
+    let mut claude_next = time::now_ms() + 1_000;
+    let mut claude_last = time::MIN;
+    let mut claude_retry_after = time::MIN;
+    let mut claude_usage_seen = time::MIN;
+    let mut dsh_usage_seen = time::MIN;
 
     let now = time::now_ms();
     engine.apply_hook_events(hook::drain_events(&paths), now);
@@ -160,12 +170,16 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 }
                 Command::Paths(paths_changed) => {
                     for path in paths_changed {
+                        if claude_login_paths.contains(&path) {
+                            claude_retry_after = time::MIN;
+                            claude_next = now.max(claude_last + 5000);
+                        }
                         if path.starts_with(&notifications_dir) {
                             check_notices = true;
                         } else if path.starts_with(&events_dir) {
                             check_hooks = true;
                         } else if !path.starts_with(&paths.state_root)
-                            && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json"))
+                            && (path.is_dir() || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json")))
                         {
                             // Only session logs, title indexes and DSH checkpoints matter;
                             // database/WAL churn must not speed the loop up.
@@ -175,6 +189,9 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 }
                 Command::Rescan => rescan = true,
                 Command::Settings(settings) => {
+                    if settings.claude_live_quota != engine.settings.claude_live_quota {
+                        claude_next = now; claude_retry_after = time::MIN;
+                    }
                     engine.update_settings(*settings);
                     rescan = true;
                 }
@@ -187,6 +204,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 }
                 Command::DshKeyChanged => {
                     balance_next = now;
+                    balance_retry_after = time::MIN;
                     if !crate::secrets::has_deepseek_key(&paths) {
                         engine.dsh_balance = None;
                         engine.dsh_balance_failure = None;
@@ -199,15 +217,29 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                         Ok(balance) => {
                             engine.dsh_balance = Some((balance, now));
                             engine.dsh_balance_failure = None;
+                            balance_retry_after = time::MIN;
                         }
                         Err(failure) => {
-                            if failure == engine::dsh_balance::Failure::Unauthorized {
-                                balance_next = now + 5 * 60 * 1000;
-                            }
+                            balance_retry_after = now + match failure { engine::dsh_balance::Failure::Unauthorized => 300_000, engine::dsh_balance::Failure::Network => 30_000, _ => 60_000 };
+                            balance_next = balance_retry_after;
                             engine.dsh_balance_failure = Some(failure);
                         }
                     }
                     engine.revision += 1;
+                }
+                Command::ClaudeQuota(result) => {
+                    claude_running = false;
+                    if engine.settings.claude_live_quota {
+                        match result {
+                            Ok(usage) => { claude_retry_after = time::MIN; engine.observe_claude_quota(usage); }
+                            Err(failure) => {
+                                claude_retry_after = now + failure.retry_ms();
+                                claude_next = claude_retry_after;
+                                engine.claude_quota_failure = Some(failure.label());
+                                engine.revision += 1;
+                            }
+                        }
+                    }
                 }
                 Command::Official(result) => {
                     official_running = false;
@@ -224,6 +256,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 Command::RefreshAccounts => {
                     official_next = official_next.min(now.max(official_last + 5_000));
                     balance_next = balance_next.min(now.max(balance_last + 5_000));
+                    claude_next = claude_next.min(now.max(claude_last + 5_000));
                 }
             }
         }
@@ -274,18 +307,32 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
         if codex_active { official_next = official_next.min(official_last + 30_000); }
         let dsh_active = engine.dsh_recently_active(now) || view.tasks.iter().any(|t|
             t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && matches!(t.status, "active" | "waiting" | "listening"));
-        if dsh_active && engine.dsh_balance_failure != Some(engine::dsh_balance::Failure::Unauthorized) {
-            balance_next = balance_next.min(balance_last + 30_000);
+        let claude_active = view.tasks.iter().any(|t| t.source == engine::Source::Claude && matches!(t.status, "active" | "waiting" | "listening"));
+        if dsh_active && now >= balance_retry_after {
+            balance_next = balance_next.min(balance_last + 5_000);
+        }
+        if claude_active && now >= claude_retry_after {
+            claude_next = claude_next.min(claude_last + 10_000);
+        }
+        for (source, seen, next, last, retry) in [
+            (engine::Source::Claude, &mut claude_usage_seen, &mut claude_next, claude_last, claude_retry_after),
+            (engine::Source::Dsh, &mut dsh_usage_seen, &mut balance_next, balance_last, balance_retry_after),
+        ] {
+            let latest = view.tasks.iter().filter(|t| t.source.quota_source(&t.provider, t.profile) == Some(source)).map(|t| t.last_usage_at).max().unwrap_or(time::MIN);
+            if latest > *seen && now >= retry {
+                *seen = latest;
+                *next = (*next).min((now + 1000).max(last + 5000));
+            }
         }
         if last_view.as_ref().is_some_and(|previous| previous.tasks.iter().any(|t|
             t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && t.status == "active"
                 && !view.tasks.iter().any(|next| next.key == t.key && next.status == "active"))) {
             balance_next = balance_next.min((now + 2_000).max(balance_last + 5_000));
         }
-        // A supplied key enables balance reads: 30s while active, 5min idle,
+        // A supplied key enables balance reads: 5s while active, 60s idle,
         // with a short debounced read when a DSH turn settles.
-        if !balance_running && now >= balance_next {
-            balance_next = now + if dsh_active { 30_000 } else { 5 * 60 * 1000 };
+        if !balance_running && now >= balance_next && now >= balance_retry_after {
+            balance_next = now + if dsh_active { 5_000 } else { 60_000 };
             if let Some(key) = crate::secrets::load_deepseek_key(&paths) {
                 balance_running = true;
                 balance_last = now;
@@ -294,6 +341,15 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                     let _ = tx.send(Command::DshBalance(engine::dsh_balance::fetch(&key)));
                 });
             }
+        }
+        if !claude_running && engine.settings.claude_live_quota && now >= claude_next && now >= claude_retry_after {
+            claude_running = true;
+            claude_last = now;
+            claude_next = now + if claude_active { 10_000 } else { 60_000 };
+            let tx = self_tx.clone();
+            let home = paths.home.clone();
+            let root = paths.claude_root.clone();
+            std::thread::spawn(move || { let _ = tx.send(Command::ClaudeQuota(engine::claude_quota::fetch(&home, &root))); });
         }
         if !official_running && now >= official_next && codex_enabled {
             official_running = true;

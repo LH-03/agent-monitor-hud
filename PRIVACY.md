@@ -17,7 +17,11 @@ Only the bounded metadata needed to show what is running now:
   context pressure, turn and question state). The compressed conversation log is never opened.
 
 Prompts, replies, tool output and attachments are never read for display, stored, or sent
-anywhere. Provider configuration and authentication files are not read.
+anywhere. Authentication is not read by task monitoring. If you explicitly enable live Claude
+allowance, the HUD reads the selected Desktop account's encrypted OAuth cache and its local
+encryption key, or the CLI sign-in as a fallback. Decryption happens in memory with Windows
+DPAPI/CNG; access tokens are used only for the official usage request, never copied to HUD files,
+printed, refreshed, or written back. Other provider credentials remain untouched.
 
 ## Data stored
 
@@ -34,6 +38,9 @@ Settings deletes the file.
   to show your balance. Nothing else is sent, and no request is made without a key.
 - Codex allowance: the HUD may ask the already signed-in local Codex client for the 5-hour and
   weekly percentages; the HUD itself does not handle Codex credentials.
+- Opt-in live Claude allowance: only `https://api.anthropic.com/api/oauth/usage`, with the locally
+  signed-in account's access token. Redirects are disabled. When this option is off, Claude
+  percentages come from its existing local snapshot without a direct request.
 
 ## Claude Code integration
 

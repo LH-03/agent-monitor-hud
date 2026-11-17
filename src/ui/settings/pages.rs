@@ -747,6 +747,7 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
         vec![
             source_row(ui, b, &["sessionSources", "claudeDesktop"], hud::ICON_CLAUDE, hud::CLAUDE_COLOR, false, "sourceClaudeDesktopOption"),
             source_row(ui, b, &["sessionSources", "claudeCli"], hud::ICON_CLAUDE_CLI, hud::CLAUDE_COLOR, false, "sourceClaudeCliOption"),
+            switch_row(ui, b, &["accounts", "claudeLiveQuota"], "claudeLiveQuota", Some("claudeLiveQuotaHint")),
             row(ui.t("claudeQuotaRow"), ui.opt("claudeQuotaSourceHint"), Some(text(ui.claude_quota, 12.5, 400, MUTED))),
         ],
         None,

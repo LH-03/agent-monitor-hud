@@ -57,10 +57,11 @@ For creating a shareable skin, use `$create-monitor-hud-theme`. Finished `.json`
 - Codex task totals come from `total_token_usage.total_tokens`.
 - Claude Code input is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`; cached is the cache-read part. Responses are de-duplicated by message id, and the context window is estimated from the model name (shown with ≈).
 - DeepSeek Harness totals and context pressure come from the harness's own token-usage projection.
+- Pricing treats ordinary input, cache reads and cache writes as disjoint buckets; writes are never charged again as ordinary input. Claude Fast rates apply only when reported by the response.
 
 ## Privacy and safety
 
-The HUD reads only metadata and token counts: Codex session identity, lifecycle, `token_count` and `turn_context` records (`~/.codex`, optionally `~/.codex-deepseek`); Claude Code project transcripts under `~/.claude/projects` (usage, model, titles and turn boundaries — never prompt or reply text); and the DeepSeek Harness session projection cache under `~/.dsh/storages`. Claude hooks only report lifecycle events. It never reads provider configuration or authentication files, uploads logs, stores prompts, or modifies sessions. Settings, the privacy-safe task-number registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
+Task monitoring reads metadata and token counts from Codex logs, Claude Code transcripts and DeepSeek Harness projections, without uploading logs, storing prompts or modifying sessions. Claude hooks report lifecycle events only. Live Claude allowance queries are off by default and require explicit opt-in (`accounts.claudeLiveQuota`): only then may the HUD read the selected Desktop account's encrypted login cache (or CLI fallback), decrypt its access token in memory and send it only to `api.anthropic.com/api/oauth/usage`. It never refreshes the token or writes authentication files. DeepSeek balance queries use the separately DPAPI-encrypted user-provided key only at `api.deepseek.com/user/balance`. Settings, the privacy-safe task-number registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
 
 All sources share one bounded monitor and stable-number pool. Closing a detached bubble only merges that surface back into the main HUD; it does not dismiss the task from aggregate monitoring.
 

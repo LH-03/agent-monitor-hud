@@ -5,6 +5,7 @@
 pub mod activity;
 pub mod allowance;
 pub mod claude;
+mod claude_login;
 pub mod claude_quota;
 pub mod codex;
 pub mod dsh;
@@ -282,6 +283,7 @@ pub struct AccountView {
     pub claude_five_hour_remaining: Option<f64>,
     pub claude_weekly_remaining: Option<f64>,
     pub claude_at: Option<i64>,
+    pub claude_failure: Option<&'static str>,
     pub dsh_balance: Option<String>,
     pub dsh_at: Option<i64>,
     /// "unauthorized", "network" or "unexpected" after a failed balance read.
@@ -323,6 +325,7 @@ pub struct Engine {
     dsh_root: PathBuf,
     dsh_archived: HashSet<String>,
     claude_quota: claude_quota::Reader,
+    pub claude_quota_failure: Option<&'static str>,
     /// Latest DeepSeek balance reading and its time; the last failure kind.
     pub dsh_balance: Option<(dsh_balance::Balance, i64)>,
     pub dsh_balance_failure: Option<dsh_balance::Failure>,
@@ -343,9 +346,6 @@ pub struct Engine {
     pub official_allowance: Option<allowance::Official>,
     last_full_scan: i64,
     last_activity_query: i64,
-    /// Database + WAL stamps per profile at the last activity query.
-    activity_stamps: HashMap<&'static str, (Option<FileStamp>, Option<FileStamp>)>,
-    last_activity_refresh: i64,
     pub last_hook_at: i64,
 }
 
@@ -364,6 +364,7 @@ impl Engine {
             dsh_root: paths.dsh_root.clone(),
             dsh_archived: HashSet::new(),
             claude_quota: claude_quota::Reader::default(),
+            claude_quota_failure: None,
             dsh_balance: None,
             dsh_balance_failure: None,
             ledger: ledger::Ledger::load(&paths.state_root, time::now_ms()),
@@ -387,8 +388,6 @@ impl Engine {
             official_allowance: None,
             last_full_scan: MIN,
             last_activity_query: MIN,
-            activity_stamps: HashMap::new(),
-            last_activity_refresh: MIN,
             last_hook_at: MIN,
         }
     }
@@ -403,6 +402,10 @@ impl Engine {
         }
         roots.push((self.claude_projects.clone(), true));
         roots.push((dsh::sessions_dir(&self.dsh_root), false));
+        roots.push((self.paths.claude_root.clone(), false));
+        for path in claude_quota::candidates(&self.paths.home) {
+            if let Some(parent) = path.parent() { roots.push((parent.to_path_buf(), false)); }
+        }
         roots
     }
 
@@ -512,16 +515,9 @@ impl Engine {
             if !self.profile_enabled(profile.id) {
                 continue;
             }
-            // The query opens Codex's database (~15 ms); skip it while neither the
-            // database nor its WAL changed, re-checking at least every 30 s.
-            let wal = profile.database_path.with_extension("sqlite-wal");
-            let stamps = (fsx::stamp(&profile.database_path), fsx::stamp(&wal));
-            let unchanged = self.activity_stamps.get(profile.id) == Some(&stamps);
-            if unchanged && now - self.last_activity_refresh < 30_000 {
-                continue;
-            }
-            self.activity_stamps.insert(profile.id, stamps);
-            self.last_activity_refresh = now;
+            // Open writers can leave the database/WAL timestamp unchanged,
+            // and a WAL reuses its allocation. Query the small indexed table
+            // at the discovery cadence instead of caching those file stamps.
             for activity in activity::recent_user_sessions(&profile.database_path, cutoff, MAX_TASKS) {
                 let path = PathBuf::from(activity::normalize_extended(&activity.rollout_path));
                 if !path_key(&path).starts_with(&path_key(&profile.sessions_root))
@@ -573,6 +569,12 @@ impl Engine {
         changed
     }
 
+    pub fn observe_claude_quota(&mut self, usage: claude_quota::PlanUsage) {
+        self.claude_quota.observe(usage);
+        self.claude_quota_failure = None;
+        self.revision += 1;
+    }
+
     /// Whether DeepSeek Harness was used recently (balance polls more often then).
     pub fn dsh_recently_active(&self, now: i64) -> bool {
         self.tasks.values().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(Source::Dsh) && now - t.activity_reference() <= 2 * 60 * 1000)
@@ -588,6 +590,7 @@ impl Engine {
             claude_five_hour_remaining: five,
             claude_weekly_remaining: week,
             claude_at: at,
+            claude_failure: if self.settings.claude_live_quota { self.claude_quota_failure } else { None },
             dsh_balance: self.dsh_balance.as_ref().map(|(b, _)| dsh_balance::format(b)),
             dsh_at: self.dsh_balance.as_ref().map(|(_, at)| *at),
             dsh_failure: self.dsh_balance_failure.as_ref().map(|f| match f {
@@ -600,7 +603,7 @@ impl Engine {
 
     pub fn activity_query_due(&self, now: i64) -> bool {
         let live = self.tasks.values().any(|t| t.source == Source::Codex && (t.turn_open || now - t.activity_reference() <= RUNTIME_FRESH_MS));
-        now - self.last_activity_query >= if live { 2000 } else { 10_000 }
+        now - self.last_activity_query >= if live { 2000 } else { 5000 }
     }
 
     pub fn full_scan_due(&self, now: i64) -> bool {
@@ -634,6 +637,22 @@ impl Engine {
         let mut titles = false;
         for path in paths {
             let key = path_key(path);
+            if path.is_dir() {
+                // A new date directory may arrive already containing logs.
+                // Windows reports the directory move, not each child file.
+                let profile = self.profiles.iter().find(|p| path.starts_with(&p.sessions_root)).map(|p| p.id);
+                if let Some(profile) = profile.filter(|id| self.profile_enabled(id)) {
+                    let mut files = Vec::new();
+                    walk_jsonl(path, &mut files, 0);
+                    let cutoff = now - self.active_window_ms().max(RUNTIME_FRESH_MS);
+                    for file in files {
+                        if let Some(stamp) = fsx::stamp(&file).filter(|s| s.write_ms >= cutoff) {
+                            changed |= self.ensure_task(&file, stamp, Source::Codex, profile, now);
+                        }
+                    }
+                }
+                continue;
+            }
             if self.tasks.contains_key(&key) {
                 changed |= self.poll_task(&key, now, PER_TASK_BUDGET);
                 continue;
@@ -707,22 +726,22 @@ impl Engine {
         let profile = self.profiles.iter().find(|p| p.id == task.profile).cloned();
         let identity = codex::read_identity(&task.path);
         task.read_blocked = fsx::is_read_blocked(&task.path);
-        if identity.found {
-            task.identity_found = true;
-            task.internal = identity.internal;
-            task.session_id = identity.session_id.clone();
-            task.workspace = identity.workspace.clone();
-            task.client = resolve_client(&identity.client, profile.as_ref());
-            task.provider = if identity.provider.is_empty() {
-                profile.as_ref().map(|p| p.default_provider.to_string()).unwrap_or_default()
-            } else {
-                identity.provider.clone()
-            };
-        } else {
-            task.session_id = codex::session_id_from_path(&task.path);
-            task.client = resolve_client("", profile.as_ref());
-            task.provider = profile.as_ref().map(|p| p.default_provider.to_string()).unwrap_or_default();
+        if !identity.found {
+            // Creation can be notified while session_meta is only half written.
+            // Keep a forward reader at byte zero so it joins that partial line
+            // with the next append; tail hydration would skip it permanently.
+            task.reader = jsonl::IncrementalReader::default();
+            self.backlog.insert(task.key.clone());
+            return;
         }
+        task.identity_found = true;
+        task.internal = identity.internal;
+        task.session_id = identity.session_id.clone();
+        task.workspace = identity.workspace.clone();
+        task.client = resolve_client(&identity.client, profile.as_ref());
+        task.provider = if identity.provider.is_empty() {
+            profile.as_ref().map(|p| p.default_provider.to_string()).unwrap_or_default()
+        } else { identity.provider.clone() };
         task.title = self.titles.get(task.profile).map(|t| t.title(&task.session_id)).unwrap_or_default();
         if task.internal {
             task.reader = jsonl::IncrementalReader::at(task.stamp.size);
@@ -1567,6 +1586,36 @@ mod account_tests {
     use super::*;
 
     #[test]
+    fn discovery_retries_a_partially_written_session_header() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("hud-discovery-{}", std::process::id()));
+        let paths = HudPaths {
+            plugin_root: root.clone(), state_root: root.join("state"), config_path: root.join("settings.json"),
+            home: root.clone(), codex_home: root.join("codex"), deepseek_home: root.join("deepseek"),
+            claude_root: root.join("claude"), dsh_root: root.join("dsh"),
+        };
+        let now = time::now_ms();
+        let mut engine = Engine::new(paths.clone(), Settings::from(&crate::config::defaults()));
+        let day = paths.codex_home.join("sessions/2026/11/15");
+        std::fs::create_dir_all(&day).unwrap();
+        let path = day.join("rollout-2026-11-15T12-00-00-00000000-0000-0000-0000-000000000001.jsonl");
+        let header = b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"00000000-0000-0000-0000-000000000001\",\"originator\":\"Codex Desktop\",\"source\":\"vscode\",\"cwd\":\"D:/Example\"}}\n";
+        let split = header.len() / 2;
+        let mut writer = std::fs::File::create(&path).unwrap();
+        writer.write_all(&header[..split]).unwrap(); writer.flush().unwrap();
+        engine.on_paths(&[path.clone()], now);
+        writer.write_all(&header[split..]).unwrap();
+        writer.write_all(b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"t\"}}\n").unwrap();
+        writer.flush().unwrap();
+        engine.poll_hot(now + 250);
+        let view = engine.view(now + 250);
+        let result = (view.tasks.len(), view.tasks.first().map(|t| t.status));
+        drop(writer); drop(engine);
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(result, (1, Some("active")), "a growing new chat must appear before its first token-usage record");
+    }
+
+    #[test]
     fn appearance_changes_do_not_reset_context_reminders() {
         let root = std::env::temp_dir().join(format!("hud-settings-unit-{}", std::process::id()));
         let paths = HudPaths {
@@ -1645,7 +1694,6 @@ fn apply_codex(task: &mut Task, record: codex::Record, now: i64, settings: &Sett
             task.workspace = workspace;
         }
         codex::Record::Started { turn_id } => {
-            task.speed.boundary();
             task.active_turn = turn_id;
             task.turn_open = true;
             task.clear_pending();
@@ -1858,7 +1906,8 @@ fn status_of(task: &Task, paused: bool, now: i64, settings: &Settings) -> &'stat
     if task.runtime_activity_at != MIN && now - task.runtime_activity_at <= RUNTIME_FRESH_MS {
         return "active";
     }
-    if task.source != Source::Codex && task.turn_open && now - task.activity_reference() <= CLAUDE_TURN_ACTIVE_MS {
+    let turn_active_ms = if task.source == Source::Codex { RUNTIME_FRESH_MS } else { CLAUDE_TURN_ACTIVE_MS };
+    if task.turn_open && now - task.activity_reference() <= turn_active_ms {
         return "active";
     }
     if task.last_read_error_at != MIN && (now - task.last_read_error_at) as f64 <= settings.error_hold_seconds * 1000.0 {
@@ -1925,6 +1974,7 @@ pub fn aggregate(snapshots: &[&Snapshot], summary_model: &str) -> Snapshot {
         out.task_output += s.task_output;
         out.task_cache_write_5m += s.task_cache_write_5m;
         out.task_cache_write_1h += s.task_cache_write_1h;
+        out.task_cache_write_30m += s.task_cache_write_30m;
         out.call_total += s.call_total;
         out.task_total += s.task_total;
         out.context_window += s.context_window;

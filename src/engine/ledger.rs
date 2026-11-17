@@ -107,17 +107,23 @@ impl Ledger {
         self.roll_day(now);
         let cost_value = cost.unwrap_or(0.0);
         let (delta_tokens, delta_cost) = match self.seen.get(key) {
-            Some(&(total, previous_cost)) => ((task_total - total).max(0), (cost_value - previous_cost).max(0.0)),
+            Some(&(total, previous_cost)) => ((task_total - total).max(0), cost_value - previous_cost),
             None if started_at >= day_start(now) => (task_total.max(0), cost_value.max(0.0)),
             None => (0, 0.0),
         };
         self.seen.insert(key.to_string(), (task_total.max(self.seen.get(key).map(|s| s.0).unwrap_or(0)), cost_value));
         if delta_tokens == 0 {
+            // A provider can refine the cache-write breakdown without changing
+            // token totals; keep the daily estimate in step with the revision.
+            if cost.is_some() && delta_cost != 0.0 {
+                self.today_cost = (self.today_cost + delta_cost).max(0.0);
+                self.dirty = true;
+            }
             return;
         }
         self.today_tokens += delta_tokens;
         if cost.is_some() {
-            self.today_cost += delta_cost;
+            self.today_cost = (self.today_cost + delta_cost).max(0.0);
         } else {
             self.cost_known = false;
         }
@@ -188,13 +194,15 @@ mod tests {
         l.observe("new", 300, Some(0.1), now - 1000, now);
         assert_eq!(l.view(now).today_tokens, 300);
         l.observe("old", 5_200, Some(1.5), day_start(now) - 10_000, now);
+        l.observe("new", 300, Some(0.2), now - 1000, now);
+        l.observe("new", 300, Some(0.15), now - 1000, now);
         let v = l.view(now);
         assert_eq!(v.today_tokens, 500);
-        assert!((v.today_cost.unwrap() - 0.6).abs() < 1e-9);
+        assert!((v.today_cost.unwrap() - 0.65).abs() < 1e-9);
         assert_eq!(*v.minutes.last().unwrap(), 500);
         l.save(now);
         let mut again = Ledger::load(&dir, now);
-        again.observe("new", 300, Some(0.1), now - 1000, now);
+        again.observe("new", 300, Some(0.15), now - 1000, now);
         assert_eq!(again.view(now).today_tokens, 500);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -16,6 +16,7 @@ pub struct Painter {
     context: Option<ID2D1DeviceContext>,
     solid: HashMap<u32, ID2D1SolidColorBrush>,
     shadows: HashMap<String, ID2D1Bitmap>,
+    corners: HashMap<[u32; 5], ID2D1Geometry>,
     round: Option<ID2D1StrokeStyle>,
     pub images: HashMap<String, ID2D1Bitmap>,
 }
@@ -38,13 +39,14 @@ fn key(c: Color) -> u32 {
 impl Painter {
     pub fn new(target: ID2D1RenderTarget) -> Painter {
         let context = target.cast::<ID2D1DeviceContext>().ok();
-        Painter { target, context, solid: HashMap::new(), shadows: HashMap::new(), round: None, images: HashMap::new() }
+        Painter { target, context, solid: HashMap::new(), shadows: HashMap::new(), corners: HashMap::new(), round: None, images: HashMap::new() }
     }
 
     /// Resources are bound to the render target; drop them when it changes.
     pub fn reset_caches(&mut self) {
         self.solid.clear();
         self.shadows.clear();
+        self.corners.clear();
         self.images.clear();
     }
 
@@ -130,11 +132,21 @@ impl Painter {
         }
     }
 
+    pub fn round_geometry(&mut self, rect: Rect, radius: f32) -> Option<ID2D1Geometry> {
+        let radius = super::shape::radius(rect, radius);
+        let key = [rect.x.to_bits(), rect.y.to_bits(), rect.w.to_bits(), rect.h.to_bits(), radius.to_bits()];
+        if let Some(path) = self.corners.get(&key) { return Some(path.clone()); }
+        let factory = unsafe { self.target.GetFactory().ok()? };
+        let path = super::shape::geometry(&factory, rect, radius).ok()?;
+        if self.corners.len() >= 192 { self.corners.clear(); }
+        self.corners.insert(key, path.clone());
+        Some(path)
+    }
+
     pub fn fill_round(&mut self, r: Rect, radius: f32, brush: &ID2D1Brush) {
         unsafe {
             if radius > 0.0 {
-                let rr = D2D1_ROUNDED_RECT { rect: rect_f(r), radiusX: radius, radiusY: radius };
-                self.target.FillRoundedRectangle(&rr, brush);
+                if let Some(path) = self.round_geometry(r, radius) { self.target.FillGeometry(&path, brush, None); }
             } else {
                 self.target.FillRectangle(&rect_f(r), brush);
             }
@@ -144,8 +156,7 @@ impl Painter {
     pub fn stroke_round(&mut self, r: Rect, radius: f32, brush: &ID2D1Brush, width: f32) {
         unsafe {
             if radius > 0.0 {
-                let rr = D2D1_ROUNDED_RECT { rect: rect_f(r), radiusX: radius, radiusY: radius };
-                self.target.DrawRoundedRectangle(&rr, brush, width, None);
+                if let Some(path) = self.round_geometry(r, radius) { self.target.DrawGeometry(&path, brush, width, None); }
             } else {
                 self.target.DrawRectangle(&rect_f(r), brush, width, None);
             }
@@ -238,12 +249,13 @@ impl Painter {
             mask.BeginDraw();
             mask.Clear(Some(&Color::argb(0, 0, 0, 0).d2d(1.0)));
             let white = mask.CreateSolidColorBrush(&Color::argb(255, 255, 255, 255).d2d(1.0), None).ok()?;
-            let shape = rect_f(Rect { x: pad, y: pad, w, h });
+            let shape = Rect { x: pad, y: pad, w, h };
             if ellipse {
                 let e = D2D1_ELLIPSE { point: Vector2 { X: pad + w / 2.0, Y: pad + h / 2.0 }, radiusX: w / 2.0, radiusY: h / 2.0 };
                 mask.FillEllipse(&e, &white);
             } else {
-                mask.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: shape, radiusX: radius, radiusY: radius }, &white);
+                let geometry = super::shape::geometry(&mask.GetFactory().ok()?, shape, radius).ok()?;
+                mask.FillGeometry(&geometry, &white, None);
             }
             mask.EndDraw(None, None).ok()?;
             let source = mask.GetBitmap().ok()?;
@@ -340,9 +352,11 @@ impl Painter {
                     _ => (bg, stroke),
                 };
                 let t = *thickness;
-                let inner_radius = (radius - t / 2.0).max(0.0);
+                let inner_radius = (super::shape::radius(rect, *radius) - t / 2.0).max(0.0);
                 if let Some(brush) = self.paint_brush(bg, rect) {
-                    self.fill_round(rect.deflate(super::layout::Th::all(t)), inner_radius, &brush);
+                    // Paint beneath the inset stroke too: separate inset fills
+                    // leave a translucent seam along antialiased corners.
+                    self.fill_round(rect, *radius, &brush);
                 }
                 for child in &el.children {
                     self.draw(child, gfx, state);

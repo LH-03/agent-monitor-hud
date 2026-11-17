@@ -49,10 +49,11 @@ tight and a fully spread layout; type never scales and the bubble never reflows 
   `token_count`, lifecycle events and `turn_context` (model, workspace leaf) are parsed; titles come
   from `session_index.jsonl`.
 - The 5-hour and weekly allowance comes from `token_count.rate_limits` in the session logs. The
-  official local `codex app-server` read runs only at startup and at most every 10 minutes while a
-  Codex task is visible.
+  official local `codex app-server` read runs every 30 seconds during activity and every 2 minutes idle.
 - Incremental per-file offsets plus a recursive directory watch; a full scan only at start, on
-  watcher overflow and every 5 minutes.
+  watcher overflow and every minute. Directory creation/moves also trigger discovery. The local
+  activity index is queried every 2 seconds during activity and every 5 seconds idle, without relying
+  on database/WAL file timestamps. Partially written new headers retain a forward reader at byte zero.
 
 ### Claude Code
 
@@ -65,8 +66,10 @@ tight and a fully spread layout; type never scales and the bubble never reflows 
 - Lifecycle from hooks (`SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure`,
   `SessionEnd`), with transcript growth as the fallback. `waiting` means Claude needs your approval
   or input.
-- Plan usage (5-hour and weekly %) is read from the usage samples Claude Desktop already keeps
-  locally (`plan-usage-history.json`, about every 15 minutes).
+- Plan usage defaults to local Desktop snapshots. Opt-in live queries use the current Desktop
+  account's encrypted OAuth cache (Windows DPAPI + CNG), falling back to the local CLI sign-in.
+  Tokens stay in memory, are sent only to `api.anthropic.com/api/oauth/usage`, and are never refreshed
+  or written back. Queries run about every 5–10 seconds active, every minute idle, with failure backoff.
 
 ### DeepSeek Harness
 
@@ -77,8 +80,8 @@ tight and a fully spread layout; type never scales and the bubble never reflows 
   user question, last message time.
 - Account balance (optional): only when you enter your own DeepSeek API key in Settings → Agents.
   The key is encrypted with Windows DPAPI for the current user, stored apart from
-  `settings.json`, and sent only to `api.deepseek.com/user/balance` (every 10 minutes while
-  DeepSeek Harness was active in the last hour, otherwise hourly).
+  `settings.json`, and sent only to `api.deepseek.com/user/balance` (about every 5 seconds active,
+  every minute idle, with debounced reads after usage/turn changes and failure backoff).
 
 ## State
 

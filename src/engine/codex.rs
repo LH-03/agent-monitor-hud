@@ -138,6 +138,7 @@ pub struct Usage {
     pub task_input: i64,
     pub task_cached: i64,
     pub task_output: i64,
+    pub task_cache_write: i64,
     pub task_total: i64,
     pub context_window: i64,
     pub allowance: Allowance,
@@ -156,6 +157,7 @@ impl Usage {
             task_cached: self.task_cached,
             task_uncached: (self.task_input - self.task_cached).max(0),
             task_output: self.task_output,
+            task_cache_write_30m: self.task_cache_write,
             call_total: self.input + self.output,
             task_total: self.task_total,
             context_window: self.context_window,
@@ -288,6 +290,7 @@ pub fn parse_record(line: &[u8], now: i64) -> Option<Record> {
                 task_input: int(total, "input_tokens").unwrap_or(input),
                 task_cached: int(total, "cached_input_tokens").unwrap_or(cached),
                 task_output: int(total, "output_tokens").unwrap_or(output),
+                task_cache_write: int(total, "cache_write_input_tokens").unwrap_or(0),
                 task_total: int(total, "total_tokens").unwrap_or(0),
                 context_window: int(info, "model_context_window").unwrap_or(0),
                 allowance,
@@ -461,6 +464,10 @@ mod tests {
         assert!(s.accounting_ok());
         assert_eq!(s.five_hour_remaining, Some(79.0));
         assert_eq!(s.weekly_remaining, Some(96.0));
+        let with_writes = br#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":30,"output_tokens":10},"total_token_usage":{"input_tokens":200,"cached_input_tokens":90,"cache_write_input_tokens":50,"output_tokens":20}}}}"#;
+        let Some(Record::Usage(u)) = parse_record(with_writes, 0) else { panic!() };
+        let s = u.to_snapshot();
+        assert_eq!((s.input, s.cached, s.uncached, s.task_cache_write_30m), (100, 40, 60, 50));
         let reserve = br#"{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"gpt-reserve","primary":{"used_percent":50,"window_minutes":300}}}}"#;
         assert_eq!(parse_record(reserve, 0), None);
     }

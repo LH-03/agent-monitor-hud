@@ -4,7 +4,7 @@
 
 A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex**,
 **Claude Code** and **DeepSeek Harness** — with token usage, context, task state and what's left of
-your plan, all read locally.
+your plan, using local metadata and optional official account queries.
 
 ![Main bubble with activity rhythm and quota groups](docs/images/hud-rhythm-dark.png)
 
@@ -35,7 +35,7 @@ Memory rows cover the HUD process, excluding MCP helpers and agent applications.
 | Agent | Surfaces | Plan / balance |
 | --- | --- | --- |
 | **Codex** | Desktop, VS Code, CLI, optional isolated DeepSeek CLI profile | 5-hour and weekly allowance |
-| **Claude Code** | Desktop Code tab, CLI | 5-hour and weekly plan usage (from Claude Desktop's local samples) |
+| **Claude Code** | Desktop Code tab, CLI | 5-hour and weekly plan usage (local samples; optional official live query) |
 | **DeepSeek Harness** | Desktop | API balance (optional, needs your API key) |
 
 Every task carries a source badge, so a Claude CLI task never looks like a Codex Desktop one.
@@ -126,9 +126,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-
 
 ## Privacy
 
-Everything stays on your machine. The HUD reads only counters and metadata (token usage, model,
-lifecycle, workspace folder name, titles) — never prompts, replies or tool output — and does not
-read provider config or credentials. The only network request is the optional DeepSeek balance.
+Task data stays on your machine: the HUD displays counters and metadata, never prompt or reply
+contents. Optional account reads use only the official providers: a saved DeepSeek key queries
+its balance; explicitly enabling live Claude allowance reuses your local login token in memory
+at Anthropic's usage endpoint. The HUD never writes back or refreshes Claude credentials.
 See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
 
 ## Build from source

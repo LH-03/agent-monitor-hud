@@ -847,6 +847,10 @@ impl SettingsWindow {
         };
         self.codex_quota = quota(a.codex_five_hour_remaining, a.codex_weekly_remaining, a.codex_at, "codexQuotaNone");
         self.claude_quota = quota(a.claude_five_hour_remaining, a.claude_weekly_remaining, a.claude_at, "claudeQuotaNone");
+        if let Some(failure) = a.claude_failure {
+            let message = loc.get(match failure { "login" => "claudeQuotaLogin", "rate_limited" => "claudeQuotaRateLimited", "network" => "claudeQuotaNetwork", _ => "claudeQuotaUnexpected" });
+            self.claude_quota = if a.claude_five_hour_remaining.is_some() || a.claude_weekly_remaining.is_some() { format!("{} · {message}", self.claude_quota) } else { message.to_string() };
+        }
         self.balance_status = if self.key_hint.is_none() {
             loc.get("dshBalanceNoKey").to_string()
         } else if let Some(failure) = a.dsh_failure {

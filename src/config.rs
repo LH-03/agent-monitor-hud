@@ -116,6 +116,7 @@ pub fn is_argb(text: &str) -> bool {
 }
 
 pub fn normalize(r: &mut Value, extra_languages: &[String]) {
+    set_bool(r, false, &["accounts", "claudeLiveQuota"]);
     set_allowed(r, "summary", &["summary", "list", "split"], &["multiTask", "displayMode"]);
     for source in ["desktop", "vscode", "defaultCli", "deepSeekCli", "claudeDesktop", "claudeCli", "deepseekHarness"] {
         set_bool(r, true, &["sessionSources", source]);
@@ -328,6 +329,7 @@ pub struct Settings {
     pub accent: String,
     pub border: String,
     pub pricing_path: String,
+    pub claude_live_quota: bool,
     pub fields: BTreeMap<String, bool>,
     pub main: MainBubble,
 }
@@ -550,6 +552,7 @@ impl Settings {
             accent: s(&["accent"], "#FF0A84FF"),
             border: s(&["border"], "#33FFFFFF"),
             pricing_path: s(&["pricing", "path"], ""),
+            claude_live_quota: bool_or(d, &["accounts", "claudeLiveQuota"], false),
             fields: d
                 .get("fields")
                 .and_then(Value::as_object)

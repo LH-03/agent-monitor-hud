@@ -170,7 +170,7 @@ pub fn can_open(t: &TaskView) -> bool {
 }
 
 fn icon_button_scaled(s: &Settings, id: u32, geometry: &str, color: &str, size: f32, margin: Th, tip: String, k: f32) -> El {
-    El::border(tint(s, color, "#FF8A94A6", 0x08), Paint::None, 0.0, 6.0 * k)
+    El::border(tint(s, color, "#FF8A94A6", 0x08), Paint::None, 0.0, size * 0.28)
         .w(size)
         .h(size)
         .m(margin)
@@ -328,7 +328,7 @@ fn average_tps_text(t: &TaskView, c: &Ctx) -> String {
 }
 fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
     let Some(s)=&t.snapshot else { return c.sloc.get("averageTpsUnavailable").into() };
-    let key=match s.average_tps_basis { "output-window"=>"averageTpsCodex", "api-request"=>"averageTpsClaude", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
+    let key=match s.average_tps_basis { "response-window"=>"averageTpsCodex", "api-request"=>"averageTpsClaude", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
     let mut text=c.sloc.get(key).to_string();
     if s.average_tps_samples>0 {
         text.push_str(&format!(" · {}: {}",c.sloc.get("averageTpsSamples"),s.average_tps_samples));
@@ -472,7 +472,7 @@ fn content_panel(c: &Ctx, m: &MainModel, status: &str, attention: bool, actions:
         let k = type_scale(s);
         header.push(
             // The disclosure and row actions share one control size and radius.
-            El::border(tint(s, &s.accent, "#FF0A84FF", 0x08), Paint::None, 0.0, 6.0 * k)
+            El::border(tint(s, &s.accent, "#FF0A84FF", 0x08), Paint::None, 0.0, d.action_size * k * 0.28)
                 .p(scale_th(Th::new(d.toggle_padding, 0.0, d.toggle_padding, 0.0), k))
                 .m(Th::new(d.header_gap * k + SPREAD_GAP * 0.4 * m.spread.0, 0.0, 0.0, 0.0))
                 .min_w((d.action_size * k).round())
@@ -1217,7 +1217,7 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
         style::surface(s, status, attention, c.image_available),
         solid(&s.border, "#22FFFFFF", Role::Decoration, s, status, attention),
         s.theme.border_width as f32,
-        if collapsed { 10.0 } else { (s.corner_radius as f32 - 4.0).max(12.0) },
+        if collapsed { 10.0 } else { s.corner_radius as f32 },
     )
     .p(if collapsed { Th::new(10.0, 6.0, 10.0, 6.0) } else { scale_th(d.bubble_padding, k) })
     .id(ID_BUBBLE_SHELL)
@@ -1233,10 +1233,10 @@ pub fn build_bubble(c: &Ctx, t: &TaskView, collapsed: bool, manual: Option<(f32,
                 .m(scale_th(Th::new(0.0, 0.0, 4.0, 4.0), k))
                 .ha(Align::End)
                 .va(Align::End)
-                .opacity(0.62)
+                .opacity(0.38)
                 .id(ID_BUBBLE_RESIZE)
                 .tip(c.sloc.get("resizeTaskBubble"))
-                .child(El::icon(RESIZE_GRIP, solid("#A60A84FF", "", Role::Decoration, s, status, attention), Paint::None, 1.35, IconFit::Viewbox, 18.0, 18.0)),
+                .child(El::icon(RESIZE_GRIP, solid(&s.muted, "#FF8A94A6", Role::Decoration, s, status, attention), Paint::None, 1.25, IconFit::Viewbox, 12.0, 12.0).ha(Align::Center).va(Align::Center)),
         );
     }
     let mut window = El::panel().max_w(960.0).max_h(360.0).child(root);
@@ -1315,7 +1315,7 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
         style::surface(&opaque, "active", true, c.image_available),
         Paint::Solid(color_or(&accent, "#FF7C3AED")),
         1.5,
-        (s.corner_radius as f32 - 6.0).max(12.0),
+        s.corner_radius as f32,
     )
     .p(Th::new(12.0, 10.0, 12.0, 11.0))
     .min_w(300.0)

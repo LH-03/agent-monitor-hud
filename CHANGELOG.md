@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.2.0 - Response timing, account refresh and cache-aware pricing
+
+- Fix inflated Codex TPS by timing each response from a turn/tool-return boundary
+  to its own usage record instead of summing short visible-summary durations.
+  Include first-token wait; exclude observed tool execution and user pauses.
+  Deduplicate usage feeds and leave missing timing unavailable. This measures
+  response throughput, not pure decoding speed.
+- Discover newly created and moved session directories promptly, recover sessions
+  adopted during a partial header write, and refresh indexed activity more often.
+- Add optional official Claude allowance queries for the selected signed-in
+  account. The switch defaults off; enabled queries use an in-memory access token
+  only at the official usage endpoint, without refreshing or saving credentials.
+  Refresh Claude and DeepSeek account readings more often during active tasks.
+- Update Claude Fable 5.2 and Mythos 5.2 API prices and explicitly reported Fast
+  rates. Keep fresh input, cache reads and cache writes separate, correct late
+  cache-write TTL breakdowns and preserve cost-only ledger adjustments.
+- Use consistent continuous corners for fills, borders, shadows and transition
+  masks; honor configured radii across surfaces and soften the resize grip.
+
 ## 4.1.0 - TPS accuracy and DeepSeek session statistics
 
 - Show DeepSeek Harness's own whole-session TPS with the same rounding as its

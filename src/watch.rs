@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_CREATION,
-    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_INFORMATION,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_INFORMATION,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadDirectoryChangesW,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
@@ -65,7 +65,7 @@ impl Watch {
                 self.buffer.as_mut_ptr() as *mut _,
                 (self.buffer.len() * 4) as u32,
                 self.recursive,
-                FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION,
+                FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION,
                 None,
                 Some(&mut *self.overlapped),
                 None,
@@ -115,7 +115,7 @@ impl Drop for Watch {
 }
 
 /// Starts watching `roots` (path, recursive). Missing roots are retried every
-/// 30 s so a later first run of Codex/Claude is picked up.
+/// 5 s so a later first run of Codex/Claude is picked up.
 pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(WatchEvent) + Send + 'static) {
     std::thread::Builder::new()
         .name("hud-watch".into())
@@ -131,10 +131,10 @@ pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(W
                     None => missing.push((root, recursive)),
                 }
             }
-            let mut retry_at = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut retry_at = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !stop.load(Ordering::Relaxed) {
                 if !missing.is_empty() && std::time::Instant::now() >= retry_at {
-                    retry_at = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                    retry_at = std::time::Instant::now() + std::time::Duration::from_secs(5);
                     let mut still = Vec::new();
                     for (root, recursive) in missing.drain(..) {
                         match Watch::open(&root, recursive) {
@@ -166,8 +166,9 @@ pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(W
                 }
                 let mut changed: Vec<PathBuf> = Vec::new();
                 let mut overflow = false;
+                let mut failed = Vec::new();
                 // Drain every signalled watch, then debounce briefly.
-                for w in watches.iter_mut() {
+                for (i, w) in watches.iter_mut().enumerate() {
                     if unsafe { windows::Win32::System::Threading::WaitForSingleObject(w.event, 0) } == WAIT_OBJECT_0 {
                         unsafe {
                             let _ = windows::Win32::System::Threading::ResetEvent(w.event);
@@ -178,8 +179,15 @@ pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(W
                         }
                         if !w.arm() {
                             overflow = true;
+                            failed.push(i);
                         }
                     }
+                }
+                // A failed handle must be reopened, not left in the wait set
+                // forever while discovery depends on the slow full scan.
+                for i in failed.into_iter().rev() {
+                    let w = watches.remove(i);
+                    missing.push((w.root.clone(), w.recursive));
                 }
                 if overflow {
                     sink(WatchEvent::Overflow);
@@ -192,4 +200,27 @@ pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(W
             }
         })
         .expect("watch thread");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn discovery_notices_a_directory_published_with_its_session() {
+        let root = std::env::temp_dir().join(format!("hud-watch-{}", std::process::id()));
+        let sessions = root.join("sessions");
+        let staged = root.join("staged");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("rollout.jsonl"), b"{}\n").unwrap();
+        let mut watch = Watch::open(&sessions, true).unwrap();
+        assert!(watch.arm());
+        let published = sessions.join("new-day");
+        std::fs::rename(staged, &published).unwrap();
+        let signaled = unsafe { windows::Win32::System::Threading::WaitForSingleObject(watch.event, 2000) };
+        let paths = if signaled == WAIT_OBJECT_0 { watch.collect().unwrap_or_default() } else { Vec::new() };
+        drop(watch);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(paths.contains(&published), "publishing a date directory must wake discovery immediately");
+    }
 }

@@ -19,16 +19,28 @@ pub struct MsgUsage {
     pub cache_read: i64,
     pub write_5m: i64,
     pub write_1h: i64,
+    pub write_breakdown_known: bool,
     pub output: i64,
 }
 
 impl MsgUsage {
     fn max(self, other: MsgUsage) -> MsgUsage {
+        let writes = self.writes().max(other.writes());
+        // A later record may replace an unsplit total with the actual TTL
+        // breakdown. Do not count the same tokens as both 5m and 1h writes.
+        let (write_5m, write_1h, write_breakdown_known) = if other.write_breakdown_known && other.writes() == writes {
+            (other.write_5m, other.write_1h, true)
+        } else if self.write_breakdown_known && self.writes() == writes {
+            (self.write_5m, self.write_1h, true)
+        } else {
+            (writes, 0, false)
+        };
         MsgUsage {
             input: self.input.max(other.input),
             cache_read: self.cache_read.max(other.cache_read),
-            write_5m: self.write_5m.max(other.write_5m),
-            write_1h: self.write_1h.max(other.write_1h),
+            write_5m,
+            write_1h,
+            write_breakdown_known,
             output: self.output.max(other.output),
         }
     }
@@ -53,7 +65,7 @@ impl MsgUsage {
 #[derive(Debug, Default)]
 pub struct TranscriptState {
     pub speed: super::speed::Tracker,
-    responses: HashMap<u64, (MsgUsage, Option<f64>)>,
+    responses: HashMap<u64, (MsgUsage, Option<f64>, bool)>,
     cost: f64,
     unpriced: usize,
     pub totals: MsgUsage,
@@ -197,18 +209,20 @@ impl TranscriptState {
                 self.last_assistant_at = at;
                 let mut result = Change::Activity;
                 if let Some(usage) = message.get("usage").filter(|u| u.is_object()) {
-                    let (write_5m, write_1h) = match usage.get("cache_creation").filter(|c| c.is_object()) {
-                        Some(split) => (int(split, "ephemeral_5m_input_tokens"), int(split, "ephemeral_1h_input_tokens")),
-                        None => (int(usage, "cache_creation_input_tokens"), 0),
-                    };
-                    // The split must add up to the reported total; otherwise trust the total.
                     let total_writes = int(usage, "cache_creation_input_tokens");
-                    let (write_5m, write_1h) = if write_5m + write_1h == total_writes { (write_5m, write_1h) } else { (total_writes, 0) };
+                    let split = usage.get("cache_creation").filter(|c| c.is_object()).map(|split|
+                        (int(split, "ephemeral_5m_input_tokens"), int(split, "ephemeral_1h_input_tokens")));
+                    // An incomplete split falls back to the total until a valid split arrives.
+                    let (write_5m, write_1h, write_breakdown_known) = match split {
+                        Some((five, hour)) if five + hour == total_writes => (five, hour, true),
+                        _ => (total_writes, 0, false),
+                    };
                     let observed = MsgUsage {
                         input: int(usage, "input_tokens"),
                         cache_read: int(usage, "cache_read_input_tokens"),
                         write_5m,
                         write_1h,
+                        write_breakdown_known,
                         output: int(usage, "output_tokens"),
                     };
                     let id = message.get("id").and_then(Value::as_str).unwrap_or("");
@@ -222,8 +236,9 @@ impl TranscriptState {
                     } else {
                         hash(root.get("uuid").and_then(Value::as_str).unwrap_or(""))
                     };
+                    let fast = usage.get("speed").and_then(Value::as_str) == Some("fast") || self.responses.get(&key).is_some_and(|(_, _, fast)| *fast);
                     let merged = match self.responses.get(&key) {
-                        Some((previous, cost)) => {
+                        Some((previous, cost, _)) => {
                             let merged = previous.max(observed);
                             self.totals.add(*previous, -1);
                             match cost { Some(c) => self.cost -= c, None => self.unpriced -= 1 }
@@ -232,10 +247,10 @@ impl TranscriptState {
                         None => observed,
                     };
                     self.totals.add(merged, 1);
-                    let tokens = crate::pricing::Tokens { input: merged.prompt_total(), cached: merged.cache_read, output: merged.output, write_5m: merged.write_5m, write_1h: merged.write_1h };
-                    let cost = pricing.call(&self.model, tokens, merged.prompt_total(), at);
+                    let tokens = crate::pricing::Tokens { input: merged.prompt_total(), cached: merged.cache_read, output: merged.output, write_5m: merged.write_5m, write_1h: merged.write_1h, ..Default::default() };
+                    let cost = pricing.call_with_speed(&self.model, tokens, merged.prompt_total(), at, fast);
                     match cost { Some(c) => self.cost += c, None => self.unpriced += 1 }
-                    self.responses.insert(key, (merged, cost));
+                    self.responses.insert(key, (merged, cost, fast));
                     self.last = Some((merged, at));
                     self.last_message_hash = key;
                     result = Change::Usage;
@@ -402,5 +417,17 @@ mod tests {
         let tool = br#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}"#;
         assert_eq!(t.apply_line(prompt, 1, &crate::pricing::Catalog::load("", Path::new("."))), Change::Prompt);
         assert_ne!(t.apply_line(tool, 2, &crate::pricing::Catalog::load("", Path::new("."))), Change::Prompt);
+    }
+    #[test]
+    fn late_cache_write_breakdown_replaces_the_fallback() {
+        let mut t = TranscriptState::default();
+        let c = crate::pricing::Catalog::load("", Path::new("."));
+        let first = r#"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":1000,"cache_creation_input_tokens":100,"output_tokens":30}}}"#;
+        let split = r#"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":1000,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100},"output_tokens":30}}}"#;
+        t.apply_line(first.as_bytes(), 0, &c);
+        t.apply_line(split.as_bytes(), 0, &c);
+        let s = t.snapshot().unwrap();
+        assert_eq!((s.input, s.cached, s.uncached, s.task_cache_write_5m, s.task_cache_write_1h), (1102, 1000, 102, 0, 100));
+        assert!((s.cost_usd.unwrap() - (2.0*4.0 + 100.0*8.0 + 1000.0*0.2 + 30.0*20.0)/1_000_000.0).abs() < 1e-12);
     }
 }

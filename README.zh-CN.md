@@ -3,7 +3,7 @@
 > [English](README.md) · Windows x64 · 原名 **Codex Monitor HUD**
 
 一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex**、**Claude Code**、
-**DeepSeek Harness**——包括 Token 用量、上下文、任务状态，以及套餐还剩多少，全部在本地读取。
+**DeepSeek Harness**——包括 Token 用量、上下文、任务状态，以及套餐还剩多少，使用本地元数据和可选的官方账户查询。
 
 ![主气泡：活动节奏 + 额度分组](docs/images/hud-rhythm-dark.png)
 
@@ -34,7 +34,7 @@ HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，�
 | Agent | 客户端 | 套餐 / 余额 |
 | --- | --- | --- |
 | **Codex** | 桌面端、VS Code、CLI、可选的独立 DeepSeek CLI Profile | 5 小时与周额度 |
-| **Claude Code** | 桌面版 Code 标签页、CLI | 5 小时与周用量（读取 Claude 桌面版的本地记录） |
+| **Claude Code** | 桌面版 Code 标签页、CLI | 5 小时与周用量（本地记录；可选启用官方实时查询） |
 | **DeepSeek Harness** | 桌面版 | API 余额（可选，需要你自己的 API Key） |
 
 每个任务前都有来源角标，Claude CLI 的任务不会被看成 Codex 桌面端的任务。

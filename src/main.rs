@@ -29,6 +29,7 @@ fn main() {
         "hook" => hook::run(),
         "mcp" => mcp::run(),
         "speed-check" if args.len() > 2 => speed_check(&args[1], &args[2], args.get(3).and_then(|v|v.parse().ok())),
+        "account-check" if args.len() > 1 => account_check(&args[1]),
         "dump" if args.len() > 1 => dump_file(&args[1]),
         "dump" => dump(),
         "integrate" | "unintegrate" => integrate::run(&args),
@@ -36,6 +37,29 @@ fn main() {
         _ => ui::app::run(&args),
     };
     std::process::exit(code);
+}
+
+/// Explicit read-only diagnostics; prints account readings without credentials.
+fn account_check(source: &str) -> i32 {
+    attach_console();
+    let paths = paths::HudPaths::resolve();
+    let result = match source {
+        "claude" => {
+            let settings = config::Settings::from(&config::load(&paths, &[]));
+            if !settings.claude_live_quota { serde_json::json!({"ok":false,"error":"opt_in_required"}) }
+            else { match engine::claude_quota::fetch(&paths.home, &paths.claude_root) {
+                Ok(u) => serde_json::json!({"ok":true,"five_hour_remaining":u.five_hour_used.map(|v|100.0-v),"weekly_remaining":u.weekly_used.map(|v|100.0-v),"observed_at":u.at}),
+                Err(e) => serde_json::json!({"ok":false,"error":e.label()}),
+            }}
+        },
+        "dsh" => match secrets::load_deepseek_key(&paths).ok_or(engine::dsh_balance::Failure::Unauthorized).and_then(|key| engine::dsh_balance::fetch(&key)) {
+            Ok(balance) => serde_json::json!({"ok":true,"balance":engine::dsh_balance::format(&balance)}),
+            Err(_) => serde_json::json!({"ok":false,"error":"balance_unavailable"}),
+        },
+        _ => return 2,
+    };
+    let _ = writeln!(std::io::stdout().lock(), "{result}");
+    if result.get("ok").and_then(serde_json::Value::as_bool) == Some(true) { 0 } else { 1 }
 }
 
 /// Metadata-only diagnostic of the same tracker used by the running HUD.

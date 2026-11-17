@@ -5,6 +5,9 @@
   "numberFormat": "exact",
   "monitorScope": "aggregate",
   "activeWindowMinutes": 30,
+  "accounts": {
+    "claudeLiveQuota": false
+  },
   "sessionSources": {
     "desktop": true,
     "vscode": true,

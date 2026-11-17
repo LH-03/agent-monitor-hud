@@ -1,4 +1,4 @@
-//! Settled model throughput. No text/tokenizer estimates and no tool wall time.
+//! Settled response throughput. No text/tokenizer estimates or tool wall time.
 use crate::util::time;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -15,7 +15,11 @@ pub struct Tracker {
     samples: VecDeque<Sample>,
     requests: HashMap<String, i64>,
     tools: HashSet<String>,
-    windows: Vec<(i64, i64)>,
+    response_started: Option<i64>,
+    tool_call_at: Option<i64>,
+    native_usage: bool,
+    last_total: Option<i64>,
+    responses: VecDeque<String>,
     native: Option<Reading>,
     published: Reading,
     refreshed: i64,
@@ -29,8 +33,8 @@ fn at(v: &Value) -> Option<i64> { v.get("timestamp").and_then(Value::as_str).and
 #[derive(Debug)]
 pub enum Event {
     Model(String),
-    Span { start: i64, end: i64 },
-    Commit { id: String, tokens: i64, at: i64 },
+    Boundary(Option<i64>),
+    Commit { id: String, tokens: i64, at: i64, native: bool, total: Option<i64> },
     Tool { id: String, running: bool, at: Option<i64> },
 }
 
@@ -38,22 +42,20 @@ pub enum Event {
 pub fn codex_event(line: &[u8]) -> Option<Event> {
     let prefix = &line[..line.len().min(2048)];
     let has=|v: &[u8]|super::jsonl::contains(prefix,v);
-    let timing=has(b"\"item_completed\"") && [b"\"Reasoning\"".as_slice(),b"\"AgentMessage\"",b"\"Plan\"",b"\"reasoning\"",b"\"agentMessage\"",b"\"agent_message\"",b"\"plan\""].iter().any(|v|has(v));
     let tool=has(b"\"response_item\"") && [b"\"function_call\"".as_slice(),b"\"function_call_output\"",b"\"custom_tool_call\"",b"\"custom_tool_call_output\"",b"\"local_shell_call\"",b"\"local_shell_call_output\""].iter().any(|v|has(v));
-    if !(has(b"\"turn_context\"") || has(b"\"token_usage_record\"") || has(b"\"token_count\"") || timing || tool) { return None; }
+    let boundary=[b"\"task_started\"".as_slice(),b"\"task_complete\"",b"\"turn_aborted\""].iter().any(|v|has(v));
+    if !(has(b"\"turn_context\"") || has(b"\"token_usage_record\"") || has(b"\"token_count\"") || tool || boundary) { return None; }
     let r: Value = serde_json::from_slice(line).ok()?;
     let p = r.get("payload")?;
     match s(&r, "type") {
         "turn_context" => Some(Event::Model(s(p,"model").into())),
-        "token_usage_record" => Some(Event::Commit { id: s(p,"response_id").into(), tokens: n(p.get("usage")?,"output_tokens"), at: at(&r)? }),
+        "token_usage_record" => Some(Event::Commit { id: s(p,"response_id").into(), tokens: n(p.get("usage")?,"output_tokens"), at: at(&r)?, native:true, total:p.get("thread_token_usage").and_then(|u|u.get("output_tokens")).and_then(Value::as_i64) }),
+        "event_msg" if s(p,"type") == "task_started" => Some(Event::Boundary(Some(at(&r)?))),
+        "event_msg" if matches!(s(p,"type"),"task_complete"|"turn_aborted") => Some(Event::Boundary(None)),
         "event_msg" if s(p,"type") == "token_count" => {
             let u=p.get("info")?.get("last_token_usage")?;
-            Some(Event::Commit { id: format!("usage:{}",at(&r)?), tokens: n(u,"output_tokens"), at: at(&r)? })
-        }
-        "event_msg" if s(p,"type") == "item_completed" => {
-            let item=p.get("item")?;
-            if !matches!(s(item,"type").to_ascii_lowercase().as_str(), "reasoning"|"agentmessage"|"agent_message"|"plan") { return None; }
-            Some(Event::Span { start: p.get("started_at_ms")?.as_i64()?, end: p.get("completed_at_ms")?.as_i64()? })
+            let total=p.get("info")?.get("total_token_usage")?.get("output_tokens")?.as_i64()?;
+            Some(Event::Commit { id: format!("usage:{total}"), tokens: n(u,"output_tokens"), at: at(&r)?, native:false, total:Some(total) })
         }
         "response_item" => {
             let kind=s(p,"type");
@@ -71,47 +73,43 @@ impl Tracker {
         if model.is_empty() || self.model == model { return; }
         self.model=model.into(); self.samples.clear(); self.native=None;
         self.published=Reading::default(); self.refreshed=0;
-        self.windows.clear();
     }
-    pub fn boundary(&mut self) { self.tools.clear();self.windows.clear(); }
+    fn boundary(&mut self) { self.tools.clear();self.response_started=None;self.tool_call_at=None; }
     pub fn tool(&mut self, id: &str, running: bool) {
         if running { self.tools.insert(id.into()); } else { self.tools.remove(id); }
     }
     pub fn observe(&mut self, event: Event) {
         match event {
             Event::Model(m) => self.model(&m),
+            Event::Boundary(start) => { self.boundary();self.response_started=start; },
             Event::Tool{id,running,at} => {
                 if running {
-                    // A completed model-generated tool call is persisted before
-                    // execution. Include the time spent generating its arguments.
-                    if let (Some(at),Some(end))=(at,self.windows.iter().map(|w|w.1).max()) {
-                        if at>end { self.add_window(end,at); }
-                    }
+                    if let Some(at)=at { self.tool_call_at=Some(self.tool_call_at.unwrap_or(at).max(at)); }
                 }
                 if !id.is_empty() { self.tool(&id,running); }
+                if !running && self.tools.is_empty() && self.response_started.is_none() { self.response_started=at; }
             },
-            Event::Span{start,end} if start>0 && end>=start => {
-                self.add_window(start,end);
+            Event::Commit{id,tokens,at,native,total} => {
+                if native {
+                    self.native_usage=true;
+                    if id.is_empty() || self.responses.contains(&id) { return; }
+                    self.responses.push_back(id.clone());
+                    while self.responses.len()>16 { self.responses.pop_front(); }
+                } else if self.native_usage || total.is_none() || total==self.last_total { return; }
+                self.last_total=total;
+                // Item timestamps describe visible summaries, not all hidden
+                // reasoning tokens. Start at the turn/tool-return boundary and
+                // end at the response's own usage record. The legacy aggregate
+                // is emitted after tools, so stop it at tool argument completion.
+                // Includes first-token latency; missing starts stay unknown.
+                let end=if native { at } else { self.tool_call_at.filter(|end|*end<=at).unwrap_or(at) };
+                if let Some(start)=self.response_started {
+                    self.add(&id,tokens,end-start,at,"response-window");
+                }
+                self.tool_call_at=None;
+                self.response_started=if self.tools.is_empty() { Some(at) } else { None };
             }
-            Event::Commit{id,tokens,at} => {
-                let ms=self.windows.iter().map(|(start,end)|end-start).sum();
-                self.windows.clear();
-                self.add(&id,tokens,ms,at,"output-window");
-            }
-            _ => {}
         }
-    }
-    /// Keep the union of output windows so overlaps are not double-counted and
-    /// gaps between independent windows do not become model time.
-    fn add_window(&mut self, mut start: i64, mut end: i64) {
-        let mut i=0;
-        while i<self.windows.len() {
-            let (a,b)=self.windows[i];
-            if end<a || b<start { i+=1; } else {
-                start=start.min(a);end=end.max(b);self.windows.swap_remove(i);
-            }
-        }
-        self.windows.push((start,end));
     }
     fn add(&mut self, id: &str, tokens: i64, ms: i64, at: i64, basis: &'static str) {
         if tokens<=0 || ms<500 { return; }
@@ -230,32 +228,78 @@ mod tests {
         t.refresh(334_000);assert_eq!(t.raw().value,None);
     }
     #[test]
-    fn codex_pairs_settled_output_with_model_time_and_deduplicates_usage_feeds() {
+    fn codex_duplicate_usage_does_not_restart_the_next_response_clock() {
         let mut t=Tracker::default();
-        let events=[
-            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning"},"started_at_ms":1000,"completed_at_ms":3000}}"#,
-            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution"},"started_at_ms":3000,"completed_at_ms":23000}}"#,
-            r#"{"timestamp":"2026-10-27T01:00:00Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"output_tokens":200}}}"#,
-            r#"{"timestamp":"2026-10-27T01:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"output_tokens":200}}}}"#,
-        ];
-        for line in events { if let Some(e)=codex_event(line.as_bytes()) { t.observe(e); } }
-        t.refresh(time::parse_iso("2026-10-27T01:00:01Z").unwrap());
-        assert_eq!(t.raw().value,Some(100.0));assert_eq!(t.raw().samples,1);
+        t.observe(Event::Boundary(Some(1000)));
+        t.observe(Event::Commit{id:"r1".into(),tokens:200,at:3100,native:true,total:Some(200)});
+        t.observe(Event::Commit{id:"r1".into(),tokens:200,at:3200,native:true,total:Some(200)});
+        t.observe(Event::Commit{id:"usage:200".into(),tokens:200,at:8000,native:false,total:Some(200)});
+        t.observe(Event::Commit{id:"r2".into(),tokens:1000,at:13200,native:true,total:Some(1200)});
+        t.refresh(13201);
+        assert!((t.raw().value.unwrap()-1200000.0/12200.0).abs()<1e-8);assert_eq!(t.raw().samples,2);
         assert!(codex_event(br#"{"type":"response_item","payload":{"type":"message","content":[{"text":"private"}]}}"#).is_none());
+        assert!(codex_event(br#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution"},"completed_at_ms":23000}}"#).is_none());
     }
     #[test]
     fn codex_counts_tool_arguments_but_not_tool_execution() {
         let mut t=Tracker::default();
-        t.observe(Event::Span{start:1000,end:2000});
-        t.observe(Event::Span{start:1500,end:2500}); // overlapping model windows
-        t.observe(Event::Span{start:3500,end:4000}); // separate model window
+        t.observe(Event::Boundary(Some(1000)));
         t.observe(Event::Tool{id:"call".into(),running:true,at:Some(7000)});
+        t.observe(Event::Tool{id:"parallel".into(),running:true,at:Some(7500)});
+        t.observe(Event::Commit{id:"response".into(),tokens:650,at:7600,native:true,total:Some(650)});
+        t.refresh(7601);assert!((t.raw().value.unwrap()-650000.0/6600.0).abs()<1e-8);
+        assert_eq!(t.reading("active").value,Some(0.0));
         t.observe(Event::Tool{id:"call".into(),running:false,at:Some(17000)});
-        t.observe(Event::Commit{id:"response".into(),tokens:1000,at:18000});
-        t.refresh(18001);
-        assert_eq!(t.raw().value,Some(200.0)); // 5 s output; 10 s tool excluded
+        assert_eq!(t.reading("active").value,Some(0.0));
+        t.observe(Event::Tool{id:"parallel".into(),running:false,at:Some(19500)});
+        t.observe(Event::Commit{id:"usage:650".into(),tokens:650,at:20000,native:false,total:Some(650)});
+        t.observe(Event::Commit{id:"next".into(),tokens:300,at:22600,native:true,total:Some(950)});
+        t.refresh(38000);
+        assert!((t.raw().value.unwrap()-950000.0/9700.0).abs()<1e-8);assert_eq!(t.raw().samples,2);
         let event=codex_event(br#"{"timestamp":"2026-10-27T01:00:05Z","type":"response_item","payload":{"type":"function_call","call_id":"call"}}"#).unwrap();
         assert!(matches!(event,Event::Tool{running:true,at:Some(_),..}));
+    }
+    #[test]
+    fn codex_hidden_reasoning_does_not_shrink_response_time() {
+        let mut t=Tracker::default();
+        let base=time::parse_iso("2026-11-17T00:00:00Z").unwrap();
+        for line in [
+            serde_json::json!({"timestamp":"2026-11-17T00:00:01Z","type":"event_msg","payload":{"type":"task_started"}}),
+            serde_json::json!({"timestamp":"2026-11-17T00:00:09Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning"},"started_at_ms":base+9000,"completed_at_ms":base+9000}}),
+            serde_json::json!({"timestamp":"2026-11-17T00:00:11Z","type":"response_item","payload":{"type":"function_call","call_id":"call"}}),
+            serde_json::json!({"timestamp":"2026-11-17T00:00:11.200Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"output_tokens":1000},"thread_token_usage":{"output_tokens":1000}}}),
+        ] { if let Some(e)=codex_event(&serde_json::to_vec(&line).unwrap()) { t.observe(e); } }
+        t.refresh(base+12000);
+        assert!((t.raw().value.unwrap()-1000000.0/10200.0).abs()<1e-8); // 10.2 s, not the 2 s summary/arguments tail.
+        assert_eq!(t.raw().basis,"response-window");
+    }
+    #[test]
+    fn codex_legacy_usage_excludes_tools_and_user_pauses() {
+        let mut t=Tracker::default();
+        t.observe(Event::Boundary(Some(1000)));
+        t.model("a"); // turn_context follows task_started, so retain the start.
+        t.observe(Event::Tool{id:"call".into(),running:true,at:Some(7000)});
+        t.observe(Event::Tool{id:"call".into(),running:false,at:Some(17000)});
+        t.observe(Event::Commit{id:"usage:600".into(),tokens:600,at:17100,native:false,total:Some(600)});
+        t.refresh(17101);assert_eq!(t.raw().value,Some(100.0));
+        t.observe(Event::Commit{id:"usage:600".into(),tokens:600,at:18000,native:false,total:Some(600)});
+        t.observe(Event::Boundary(None));
+        t.observe(Event::Boundary(Some(100000)));
+        t.observe(Event::Commit{id:"usage:800".into(),tokens:200,at:102100,native:false,total:Some(800)});
+        t.refresh(102101);assert!((t.raw().value.unwrap()-800000.0/8100.0).abs()<1e-8);assert_eq!(t.raw().samples,2);
+        let event=codex_event(br#"{"timestamp":"2026-11-17T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"output_tokens":600},"total_token_usage":{"output_tokens":600}}}}"#).unwrap();
+        assert!(matches!(event,Event::Commit{native:false,total:Some(600),tokens:600,..}));
+    }
+    #[test]
+    fn codex_tail_without_a_start_stays_unknown_until_a_tool_return() {
+        let mut t=Tracker::default();
+        t.observe(Event::Tool{id:"call".into(),running:true,at:Some(3000)});
+        t.observe(Event::Commit{id:"incomplete".into(),tokens:1000,at:3100,native:true,total:None});
+        t.refresh(3101);assert_eq!(t.raw().value,None);
+        t.observe(Event::Tool{id:"call".into(),running:false,at:Some(13000)});
+        t.observe(Event::Tool{id:"next".into(),running:true,at:Some(15000)});
+        t.observe(Event::Commit{id:"complete".into(),tokens:200,at:15100,native:true,total:None});
+        t.refresh(15101);assert!((t.raw().value.unwrap()-200000.0/2100.0).abs()<1e-8);assert_eq!(t.raw().samples,1);
     }
     #[test]
     fn claude_matches_request_refs_and_deduplicates_content_blocks() {

@@ -2,7 +2,6 @@
 
 use super::{color::Color, gfx::Gfx, layout::{El, Kind, Paint, Rect}, paint::{DrawState, Painter, mul}};
 use windows::Win32::Graphics::Direct2D::{Common::D2D_RECT_F, *};
-use windows::core::Interface;
 use windows_numerics::Matrix3x2;
 
 #[derive(Clone, Copy, Debug)]
@@ -80,9 +79,7 @@ pub fn draw(p: &mut Painter, gfx: &Gfx, old: &El, new: &El, frame: (f32, f32), o
     shell.rect = rect;
     shell.opacity = old.opacity + (new.opacity - old.opacity) * amount;
     p.draw(&shell, gfx, state);
-    let mask = unsafe { gfx.d2d.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
-        rect: D2D_RECT_F { left: rect.x, top: rect.y, right: rect.x + rect.w, bottom: rect.y + rect.h }, radiusX: radius, radiusY: radius,
-    }).ok().and_then(|g| g.cast::<ID2D1Geometry>().ok()) };
+    let mask = p.round_geometry(rect, radius);
     let (outgoing, incoming) = weights(t);
     for (root, content, alpha, offset) in [(old, old_shell, outgoing * old_alpha, old_offset), (new, new_shell, incoming, new_offset)] {
         if alpha <= 0.001 { continue }

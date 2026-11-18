@@ -1,8 +1,5 @@
-# Restores the Codex Monitor HUD 3.x install that Agent Monitor HUD 4.x
-# replaced: plugin folder, Codex plugin cache, settings shortcuts, and Claude
-# Code configuration (only the HUD's own hooks/MCP entries are removed, so later
-# unrelated Claude changes are kept). Settings in %LOCALAPPDATA%\CodexMonitorHUD
-# are shared and untouched.
+# Restores the 3.x plugin, Codex cache and settings shortcuts. The HUD settings
+# directory is shared by both versions.
 param(
     # The 3.x version to restore; read from the install when omitted.
     [string]$Version
@@ -43,11 +40,6 @@ if ($PSCommandPath -and -not $PSCommandPath.StartsWith($env:TEMP, [StringCompari
     exit $LASTEXITCODE
 }
 
-$exe = @((Join-Path $plugin 'bin\AgentMonitorHUD.exe'), (Join-Path $plugin 'bin\CodexMonitorHUD.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($exe) {
-    # Remove only our Claude entries while the binary is still present.
-    & $exe unintegrate claude | Out-Null
-}
 if (-not $sandbox) {
     Get-Process CodexMonitorHUD, AgentMonitorHUD -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$plugin*" } |
         ForEach-Object { $_.CloseMainWindow() | Out-Null; if (-not $_.WaitForExit(1500)) { $_ | Stop-Process -Force } }
@@ -76,4 +68,4 @@ if (Test-Path (Join-Path $shortcuts 'startmenu.lnk')) {
 }
 
 Write-Output "Restored $Version at $plugin. Restart Codex to reload the plugin."
-if (Test-Path $keepBackup) { Write-Output "Backups of the 4.x install remain in $keepBackup (Claude config copies under claude\)." }
+if (Test-Path $keepBackup) { Write-Output "Backups of the 4.x install remain in $keepBackup." }

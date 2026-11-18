@@ -15,8 +15,6 @@ pub struct Rate {
     pub input: f64,
     pub cached: f64,
     pub output: f64,
-    pub write_5m: f64,
-    pub write_1h: f64,
     pub write_30m: f64,
 }
 
@@ -26,7 +24,6 @@ struct ModelPrice {
     long: Option<(i64, f64, f64)>,
     schedule: String,
     peak_multiplier: f64,
-    fast_multiplier: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -118,14 +115,11 @@ impl Catalog {
                     input,
                     cached,
                     output,
-                    write_5m: num("cache_write_5m_per_million").unwrap_or(input * 1.25),
-                    write_1h: num("cache_write_1h_per_million").unwrap_or(input * 2.0),
                     write_30m: num("cache_write_30m_per_million").unwrap_or(input),
                 },
                 long: rates.get("long_context").and_then(|l| Some((l.get("above_input_tokens")?.as_i64()?, l.get("input_multiplier")?.as_f64()?, l.get("output_multiplier")?.as_f64()?))),
                 schedule: rates.get("peak_schedule").and_then(Value::as_str).unwrap_or("").into(),
                 peak_multiplier: num("peak_multiplier").unwrap_or(1.0),
-                fast_multiplier: num("fast_multiplier"),
                 },
             );
         }
@@ -142,8 +136,6 @@ impl Catalog {
 
     fn resolve(&self, model: &str) -> Option<&ModelPrice> {
         let model = model.trim().to_ascii_lowercase();
-        // Claude Code appends context markers such as `[1m]`.
-        let model = model.split('[').next().unwrap_or("").trim().to_string();
         let mut candidates = vec![model.clone()];
         if let Some(base) = strip_date_suffix(&model) {
             candidates.push(base);
@@ -173,28 +165,17 @@ impl Catalog {
     }
 
     pub fn call(&self, model: &str, tokens: Tokens, prompt: i64, at: i64) -> Option<f64> {
-        self.call_with_speed(model, tokens, prompt, at, false)
-    }
-
-    pub fn call_with_speed(&self, model: &str, tokens: Tokens, prompt: i64, at: i64, fast: bool) -> Option<f64> {
         let price = self.resolve(model)?;
         let mut rate = price.base;
         if let Some((_, input, output)) = price.long.filter(|(above, _, _)| prompt > *above) {
             rate.input *= input; rate.cached *= input;
-            rate.write_5m *= input; rate.write_1h *= input;
             rate.write_30m *= input;
             rate.output *= output;
         }
         if !price.schedule.is_empty() && self.schedules.get(&price.schedule)?.peak(at)? {
             rate.input *= price.peak_multiplier; rate.cached *= price.peak_multiplier;
-            rate.write_5m *= price.peak_multiplier; rate.write_1h *= price.peak_multiplier;
             rate.write_30m *= price.peak_multiplier;
             rate.output *= price.peak_multiplier;
-        }
-        if fast {
-            let multiplier = price.fast_multiplier?;
-            rate.input *= multiplier; rate.cached *= multiplier; rate.output *= multiplier;
-            rate.write_5m *= multiplier; rate.write_1h *= multiplier; rate.write_30m *= multiplier;
         }
         Some(tokens.priced(rate))
     }
@@ -223,27 +204,30 @@ impl Catalog {
 /// Inclusive input, cache reads and cache writes (writes are a subset of input).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tokens {
-    pub input: i64, pub cached: i64, pub output: i64, pub write_5m: i64, pub write_1h: i64,
+    pub input: i64, pub cached: i64, pub output: i64,
     #[serde(default)]
     pub write_30m: i64,
 }
 
 impl From<&Snapshot> for Tokens {
     fn from(s: &Snapshot) -> Self {
-        Self { input: s.task_input, cached: s.task_cached, output: s.task_output, write_5m: s.task_cache_write_5m, write_1h: s.task_cache_write_1h, write_30m: s.task_cache_write_30m }
+        Self { input: s.task_input, cached: s.task_cached, output: s.task_output, write_30m: s.task_cache_write_30m }
     }
 }
 impl Tokens {
     fn priced(self, r: Rate) -> f64 {
-        ((self.input - self.cached - self.write_5m - self.write_1h - self.write_30m).max(0) as f64 * r.input
+        ((self.input - self.cached - self.write_30m).max(0) as f64 * r.input
             + self.cached as f64 * r.cached + self.output as f64 * r.output
-            + self.write_5m as f64 * r.write_5m + self.write_1h as f64 * r.write_1h
             + self.write_30m as f64 * r.write_30m) / 1_000_000.0
     }
     fn delta(self, old: Self) -> Option<Self> {
-        let d = Self { input: self.input-old.input, cached: self.cached-old.cached, output: self.output-old.output,
-            write_5m: self.write_5m-old.write_5m, write_1h: self.write_1h-old.write_1h, write_30m: self.write_30m-old.write_30m };
-        (d.input >= 0 && d.cached >= 0 && d.output >= 0 && d.write_5m >= 0 && d.write_1h >= 0 && d.write_30m >= 0).then_some(d)
+        let d = Self {
+            input: self.input - old.input,
+            cached: self.cached - old.cached,
+            output: self.output - old.output,
+            write_30m: self.write_30m - old.write_30m,
+        };
+        (d.input >= 0 && d.cached >= 0 && d.output >= 0 && d.write_30m >= 0).then_some(d)
     }
 }
 
@@ -310,7 +294,7 @@ impl CostBook {
     }
 }
 
-/// `gpt-5.4-2026-03-05` → `gpt-5.4`, `claude-haiku-4-5-20251001` → `claude-haiku-4-5`.
+/// `gpt-5.4-2026-03-05` → `gpt-5.4`.
 fn strip_date_suffix(model: &str) -> Option<String> {
     let bytes = model.as_bytes();
     if model.len() > 11 && bytes[model.len() - 11] == b'-' {
@@ -355,22 +339,6 @@ fn expand_env(text: &str) -> String {
     out
 }
 
-/// Context window for Claude models when the transcript does not report one.
-/// Current 4.6+/5.x models default to 1M; Haiku 4.5 and older use 200K.
-pub fn claude_context_window(model: &str) -> i64 {
-    let m = model.to_ascii_lowercase();
-    if m.contains("[1m]") {
-        return 1_000_000;
-    }
-    let older = ["claude-3", "claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5", "claude-opus-4-1", "claude-opus-4-0",
-        "claude-sonnet-4-0", "claude-sonnet-4-2", "claude-opus-4-2"];
-    if older.iter().any(|p| m.starts_with(p)) || m == "claude-sonnet-4" || m == "claude-opus-4" {
-        200_000
-    } else {
-        1_000_000
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,10 +351,7 @@ mod tests {
         assert!((cost - (0.5 * 4.0 + 0.5 * 0.4 + 0.1 * 20.0)).abs() < 1e-9);
         s.model = "brand-new-model".into();
         assert!(c.estimate(&s).is_none());
-        s.model = "claude-haiku-4-5-20251001".into();
-        assert!(c.estimate(&s).is_some());
-        s.model = "claude-opus-5-5[1m]".into();
-        assert!(c.estimate(&s).is_some());
+
     }
 
     #[test]
@@ -399,18 +364,6 @@ mod tests {
         // DeepSeek charges both ordinary and write input at its miss rate.
         let deepseek = c.call("deepseek-flash", tokens, 100_000, at).unwrap();
         assert!((deepseek - (60_000.0*0.30 + 40_000.0*0.006 + 10_000.0*1.2)/1_000_000.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn new_claude_models_keep_reads_writes_and_fast_prices_separate() {
-        let c = Catalog::load("", std::path::Path::new("."));
-        let tokens = Tokens { input: 100_000, cached: 80_000, write_5m: 5_000, write_1h: 5_000, output: 1_000, ..Default::default() };
-        for model in ["claude-fable-5-2", "claude-mythos-5-2-20261109"] {
-            assert!((c.call(model,tokens,100_000,1).unwrap() - 0.266).abs() < 1e-12);
-            assert!((c.call_with_speed(model,tokens,100_000,1,true).unwrap() - 0.532).abs() < 1e-12);
-            let reads = Tokens { input: 1_000_000, cached: 1_000_000, ..Default::default() };
-            assert!((c.call(model,reads,1_000_000,1).unwrap() - 0.2).abs() < 1e-12);
-        }
     }
 
     #[test]
@@ -452,7 +405,7 @@ mod tests {
     #[test]
     fn old_checkpoint_rebases_writes_without_double_charging() {
         let c = Catalog::load("", std::path::Path::new("."));
-        let old: Point = serde_json::from_str(r#"{"tokens":{"input":100000,"cached":40000,"output":10000,"write_5m":0,"write_1h":0},"cost":0.224,"at":1}"#).unwrap();
+        let old: Point = serde_json::from_str(r#"{"tokens":{"input":100000,"cached":40000,"output":10000},"cost":0.224,"at":1}"#).unwrap();
         let mut book = CostBook { points: HashMap::from([("s".into(), old)]), path: PathBuf::new(), dirty: false, saved_at: 0 };
         let mut s = Snapshot { model: "gpt-6.1-sol".into(), input: 100_000, output: 10_000, task_input: 100_000,
             task_cached: 40_000, task_output: 10_000, task_cache_write_30m: 30_000, timestamp: 2, ..Default::default() };
@@ -471,7 +424,6 @@ mod tests {
         let rate = |model, prompt, date| c.call(model, tokens, prompt, at(date)).unwrap();
         assert!((rate("gpt-6.1-sol", 272_000, "2026-10-27T01:00:00Z") - 2.05).abs() < 1e-9);
         assert!((rate("gpt-6.1-sol", 272_001, "2026-10-27T01:00:00Z") - 3.6).abs() < 1e-9);
-        assert!((rate("claude-haiku-5-5", 100_001, "2026-10-27T01:00:00Z") - 5.0 * rate("claude-haiku-5-5", 100_000, "2026-10-27T01:00:00Z")).abs() < 1e-9);
         assert!((rate("gpt-6.1-terra", 272_000, "2026-10-27T01:00:00Z") - 1.025).abs() < 1e-9);
         assert!((rate("gpt-6.1-terra", 272_001, "2026-10-27T01:00:00Z") - 1.8).abs() < 1e-9);
         let low = rate("deepseek-v4.1-flash-1017", 200_000, "2026-10-27T00:59:59Z");
@@ -483,7 +435,7 @@ mod tests {
         }
         assert!(c.call("deepseek-flash", tokens, 200_000, at("2027-01-04T02:00:00Z")).is_none());
         for model in ["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-            "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5", "claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "deepseek-v4-pro-0813"] {
+            "deepseek-v4-pro-0813"] {
             assert!(c.call(model, tokens, 200_000, at("2026-10-27T12:00:00Z")).is_some(), "{model}");
         }
     }

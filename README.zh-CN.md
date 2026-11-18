@@ -2,7 +2,7 @@
 
 > [English](README.md) · Windows x64 · 原名 **Codex Monitor HUD**
 
-一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex**、**Claude Code**、
+一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex** 和
 **DeepSeek Harness**——包括 Token 用量、上下文、任务状态，以及套餐还剩多少，使用本地元数据和可选的官方账户查询。
 
 ![主气泡：活动节奏 + 额度分组](docs/images/hud-rhythm-dark.png)
@@ -11,7 +11,7 @@
 > 用 Rust 从零重写为单个原生可执行文件。外观、
 > 设置和插件 ID 都保持不变。
 
-HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，不再打包 .NET 运行时、Node.js
+HUD、设置窗口和 MCP 服务共用同一个原生程序，不再打包 .NET 运行时、Node.js
 宿主或 WebView。实现方式见[架构说明](docs/ARCHITECTURE.md)。
 
 ### 已有实测提升
@@ -34,10 +34,9 @@ HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，�
 | Agent | 客户端 | 套餐 / 余额 |
 | --- | --- | --- |
 | **Codex** | 桌面端、VS Code、CLI、可选的独立 DeepSeek CLI Profile | 5 小时与周额度 |
-| **Claude Code** | 桌面版 Code 标签页、CLI | 5 小时与周用量（本地记录；可选启用官方实时查询） |
 | **DeepSeek Harness** | 桌面版 | API 余额（可选，需要你自己的 API Key） |
 
-每个任务前都有来源角标，Claude CLI 的任务不会被看成 Codex 桌面端的任务。
+每个任务前都有来源角标。
 
 ## 你会看到什么
 
@@ -94,11 +93,12 @@ HUD、设置窗口、Claude hooks 和 MCP 服务共用同一个原生程序，�
    ```
 
 安装位置是 `~/plugins/codex-monitor-hud`。脚本会在桌面和开始菜单创建 *Agent Monitor HUD Settings*
-快捷方式，为 Codex 注册插件；如果装了 Claude Code，还会为它加上 HUD 的生命周期 hooks 和 MCP 服务
-（加 `-NoClaude` 可跳过）。
+快捷方式，并为 Codex 注册插件。
 
-也可以把仓库地址交给 Codex 或 Claude Code，说一句**“帮我安装”**；Agent 的安装流程见
+也可以把仓库地址交给 Codex，说一句**“帮我安装”**；Agent 的安装流程见
 [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md)。
+
+**从 4.0–4.2 升级**：用过旧版第三方集成的用户，先运行旧版 HUD 的卸载脚本，再安装 4.3。旧卸载脚本会注销该集成，默认保留 HUD 设置。
 
 **从 3.x 升级**是自动的：设置会保留，整个 3.x 插件目录会完整保存为
 `~/plugins/.codex-monitor-hud-rollback-<版本>`。想回退：
@@ -141,7 +141,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 ## 项目说明
 
-非官方的独立项目，与 OpenAI、Anthropic、DeepSeek 没有关联，也未获其背书。费用数字是按公开 API
+非官方的独立项目，与 OpenAI、DeepSeek 没有关联，也未获其背书。费用数字是按公开 API
 价格的估算，不是你的订阅账单。仅支持 Windows x64。
 
 3.x 的历史仍保留在本仓库中。

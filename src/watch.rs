@@ -115,7 +115,7 @@ impl Drop for Watch {
 }
 
 /// Starts watching `roots` (path, recursive). Missing roots are retried every
-/// 5 s so a later first run of Codex/Claude is picked up.
+/// 5 s so a later first run of a monitored client is picked up.
 pub fn spawn(roots: Vec<(PathBuf, bool)>, stop: Arc<AtomicBool>, sink: impl Fn(WatchEvent) + Send + 'static) {
     std::thread::Builder::new()
         .name("hud-watch".into())

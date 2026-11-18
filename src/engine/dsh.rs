@@ -94,7 +94,6 @@ impl Projection {
             task_total: task_input + self.totals.output,
             context_window: window,
             context_percent: if window > 0 { (pressure as f64 * 100.0 / window as f64).min(100.0) } else { 0.0 },
-            context_estimated: false,
             model: self.model.clone(),
             workspace: self.workspace(),
             active_tasks: 1,

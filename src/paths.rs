@@ -15,8 +15,6 @@ pub struct HudPaths {
     pub codex_home: PathBuf,
     /// `~/.codex-deepseek`
     pub deepseek_home: PathBuf,
-    /// `CLAUDE_CONFIG_DIR` or `~/.claude`
-    pub claude_root: PathBuf,
     /// `DSH_HOME` or `~/.dsh` (DeepSeek Harness)
     pub dsh_root: PathBuf,
 }
@@ -50,10 +48,6 @@ impl HudPaths {
                 .unwrap_or_else(|| home.join("AppData").join("Local"));
             local.join("CodexMonitorHUD")
         };
-        let claude_root = env::var_os("CODEX_MONITOR_HUD_CLAUDE_ROOT")
-            .or_else(|| env::var_os("CLAUDE_CONFIG_DIR"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".claude"));
         let dsh_root = env::var_os("CODEX_MONITOR_HUD_DSH_ROOT")
             .or_else(|| env::var_os("DSH_HOME"))
             .map(PathBuf::from)
@@ -65,7 +59,6 @@ impl HudPaths {
             plugin_root,
             state_root,
             home,
-            claude_root,
             dsh_root,
         }
     }
@@ -80,10 +73,6 @@ impl HudPaths {
 
     pub fn notifications_dir(&self) -> PathBuf {
         self.state_root.join("notifications")
-    }
-
-    pub fn claude_state_dir(&self) -> PathBuf {
-        self.state_root.join("claude")
     }
 
     pub fn registry_path(&self) -> PathBuf {

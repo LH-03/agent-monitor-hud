@@ -1,7 +1,7 @@
 //! Settled response throughput. No text/tokenizer estimates or tool wall time.
 use crate::util::time;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 const REFRESH_MS: i64 = 30_000;
 const WINDOW_MS: i64 = 300_000;
@@ -13,7 +13,6 @@ pub struct Reading { pub value: Option<f64>, pub samples: usize, pub at: i64, pu
 pub struct Tracker {
     model: String,
     samples: VecDeque<Sample>,
-    requests: HashMap<String, i64>,
     tools: HashSet<String>,
     response_started: Option<i64>,
     tool_call_at: Option<i64>,
@@ -121,39 +120,6 @@ impl Tracker {
             while self.samples.len()>5 { self.samples.pop_front(); }
         }
     }
-    pub fn claude_line(&mut self, line: &[u8]) {
-        if ![b"\"api-request\"".as_slice(),b"\"assistant\"",b"\"tool_result\""].iter().any(|p| super::jsonl::contains(line,p)) { return; }
-        let Ok(r)=serde_json::from_slice::<Value>(line) else { return; };
-        self.claude_record(&r);
-    }
-    pub fn claude_record(&mut self, r: &Value) {
-        if r.get("isSidechain").and_then(Value::as_bool)==Some(true) { return; }
-        match s(&r,"type") {
-            "api-request" => {
-                if let Some(at)=at(&r) {
-                    if self.requests.len()>=16 { self.requests.retain(|_,start|at-*start<WINDOW_MS); }
-                    if self.requests.len()<16 { self.requests.insert(s(&r,"id").into(),at); }
-                }
-            }
-            "assistant" => {
-                let Some(m)=r.get("message") else { return; };
-                if !s(m,"model").starts_with('<') { self.model(s(m,"model")); }
-                let reference=s(&r,"requestRef");
-                if let (Some(start),Some(end),Some(u))=(self.requests.get(reference).copied(),at(&r),m.get("usage")) {
-                    self.add(reference,n(u,"output_tokens"),end-start,end,"api-request");
-                }
-                if let Some(blocks)=m.get("content").and_then(Value::as_array) {
-                    for b in blocks { if s(b,"type")=="tool_use" { self.tool(s(b,"id"),true); } }
-                }
-            }
-            "user" => {
-                if let Some(blocks)=r.get("message").and_then(|m|m.get("content")).and_then(Value::as_array) {
-                    for b in blocks { if s(b,"type")=="tool_result" { self.tool(s(b,"tool_use_id"),false); } }
-                }
-            }
-            _ => {}
-        }
-    }
     pub fn dsh(&mut self, p: &super::dsh::Projection, at: i64) {
         self.model(&p.model);
         // Match the Harness session-statistics pill: its entire session's
@@ -185,14 +151,6 @@ impl Tracker {
         if self.native.is_none() && (status!="active" || !self.tools.is_empty()) { Reading {value:Some(0.0),..self.published} } else { self.published }
     }
     pub fn raw(&self) -> Reading { self.published }
-}
-
-pub fn hydrate_claude(path: &std::path::Path, now: i64) -> Tracker {
-    let mut lines=Vec::new();
-    let _=super::jsonl::read_tail_reverse(path,1024*1024,1024,|line| { lines.push(line.to_vec());true });
-    let mut tracker=Tracker::default();
-    for line in lines.into_iter().rev() { tracker.claude_line(&line); }
-    tracker.refresh(now);tracker
 }
 
 /// Recover only recent timing/usage metadata from a bounded tail, not a full
@@ -300,18 +258,6 @@ mod tests {
         t.observe(Event::Tool{id:"next".into(),running:true,at:Some(15000)});
         t.observe(Event::Commit{id:"complete".into(),tokens:200,at:15100,native:true,total:None});
         t.refresh(15101);assert!((t.raw().value.unwrap()-200000.0/2100.0).abs()<1e-8);assert_eq!(t.raw().samples,1);
-    }
-    #[test]
-    fn claude_matches_request_refs_and_deduplicates_content_blocks() {
-        let mut t=Tracker::default();
-        t.claude_line(br#"{"type":"api-request","id":"r1","timestamp":"2026-10-27T01:00:00Z"}"#);
-        let record=br#"{"type":"assistant","requestRef":"r1","timestamp":"2026-10-27T01:00:02Z","message":{"model":"claude-opus-5-5","usage":{"output_tokens":100},"content":[{"type":"tool_use","id":"t1"}]}}"#;
-        t.claude_line(record);t.claude_line(record);
-        let now=time::parse_iso("2026-10-27T01:00:03Z").unwrap();t.refresh(now);
-        assert_eq!(t.raw().value,Some(50.0));assert_eq!(t.raw().samples,1);
-        assert_eq!(t.reading("active").value,Some(0.0));
-        t.claude_line(br#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]}}"#);
-        assert_eq!(t.reading("active").value,Some(50.0));
     }
     #[test]
     fn dsh_matches_harness_session_totals_across_phases_and_model_changes() {

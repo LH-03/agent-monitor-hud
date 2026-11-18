@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.3.0 - Codex and DeepSeek Harness
+
+- Focus task monitoring, account readings and notifications on Codex and DeepSeek Harness.
+- Simplify setup and refresh the settings and task previews.
+
 ## 4.2.1 - GPT-6.2 pricing
 
 - Add Standard API rates for GPT-6.2 Astra and Sol, including long-context
@@ -16,13 +21,6 @@
   response throughput, not pure decoding speed.
 - Discover newly created and moved session directories promptly, recover sessions
   adopted during a partial header write, and refresh indexed activity more often.
-- Add optional official Claude allowance queries for the selected signed-in
-  account. The switch defaults off; enabled queries use an in-memory access token
-  only at the official usage endpoint, without refreshing or saving credentials.
-  Refresh Claude and DeepSeek account readings more often during active tasks.
-- Update Claude Fable 5.2 and Mythos 5.2 API prices and explicitly reported Fast
-  rates. Keep fresh input, cache reads and cache writes separate, correct late
-  cache-write TTL breakdowns and preserve cost-only ledger adjustments.
 - Use consistent continuous corners for fills, borders, shadows and transition
   masks; honor configured radii across surfaces and soften the resize grip.
 
@@ -39,9 +37,8 @@
 
 ## 4.0.2 - Source icons, usage and window fixes
 
-- Use official source marks for Codex Desktop, VS Code, Claude Code and DeepSeek
-  Harness, including Clawd for Claude Code CLI.
-- Refresh available Codex, Claude and DeepSeek account data more promptly; show
+- Use official source marks for Codex Desktop, VS Code and DeepSeek Harness.
+- Refresh available Codex and DeepSeek account data more promptly; show
   quota groups only for sources with active tasks.
 - Add a sampled TPS indicator to task lists and detached bubbles. Tool calls and
   inactive tasks show zero; unavailable timing remains unavailable.
@@ -68,17 +65,11 @@
 
 ## 4.0.0 - Agent Monitor HUD: native Rust rewrite
 
-Rewritten from scratch in Rust by Claude Opus 5.5 (Anthropic) in Claude Code, with the maintainer
-directing the design. Renamed from Codex Monitor HUD because it now watches more than Codex.
-
 - One native executable replaces the WPF app, its bundled .NET runtime and the Node.js MCP
-  host. Settings, hook handling and the MCP server are native executable modes.
+  host. Settings and the MCP server are native executable modes.
 - Migration measurements record about 93% lower resident HUD private memory and 83% lower working
   set. The complete release payload is about 98% smaller; see [performance details](docs/PERFORMANCE.md).
-- New sources: **Claude Code** (desktop Code tab and CLI, with lifecycle hooks and a `waiting`
-  state for approvals/questions) and **DeepSeek Harness** (desktop).
-- Plan and balance: Claude 5-hour and weekly usage from Claude Desktop's local samples; optional
-  DeepSeek API balance with a DPAPI-encrypted key you enter yourself.
+- Add DeepSeek Harness desktop monitoring and optional API balance.
 - Main bubble: choose what leads (metrics, an activity-rhythm sparkline with today's total, or
   nothing), a compact task status, per-agent quota meters that warn when low, and a waiting badge.
   Dragging the corner loosens spacing within limits; type never scales.

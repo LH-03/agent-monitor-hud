@@ -5,16 +5,11 @@
   "numberFormat": "exact",
   "monitorScope": "aggregate",
   "activeWindowMinutes": 30,
-  "accounts": {
-    "claudeLiveQuota": false
-  },
   "sessionSources": {
     "desktop": true,
     "vscode": true,
     "defaultCli": true,
     "deepSeekCli": true,
-    "claudeDesktop": true,
-    "claudeCli": true,
     "deepseekHarness": true
   },
   "multiTask": {
@@ -163,8 +158,6 @@
     "activeTasks": true,
     "weeklyRemaining": true,
     "fiveHourRemaining": true,
-    "claudeFiveHourRemaining": true,
-    "claudeWeeklyRemaining": true,
     "dshBalance": true,
     "estimatedCost": false
   },

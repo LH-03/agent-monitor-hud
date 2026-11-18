@@ -1,4 +1,4 @@
-# Install with an agent (Codex or Claude Code)
+# Install with an agent (Codex)
 
 This is the canonical agent procedure. A repository URL plus "install this" / “帮我安装” is enough.
 Do not infer installation commands from other documents.
@@ -21,8 +21,7 @@ Do not infer installation commands from other documents.
    ```
 
    The script stops without changing anything if it finds an unexpected existing install.
-6. Report only the installer's summary lines (version, mode, install path, Claude Code integration
-   result). Coming from 3.x, also tell the user where the rollback copy is.
+6. Report the version, install mode and path. For an upgrade from 3.x, include the rollback path.
 7. After a first install, mention the optional extras and let the user decide: source filters,
    themes, cost estimates, proactive notices, the DeepSeek balance (the user enters their own key
    in Settings → Agents; never enter or handle it for them).
@@ -38,22 +37,16 @@ codex plugin add codex-monitor-hud@local --json
 
 New or updated plugin tools are picked up by a new Codex task.
 
-## Claude Code
-
-When Claude Code is present, the installer runs `AgentMonitorHUD.exe integrate claude`, which adds
-only the HUD's lifecycle hooks and the user-scope `agent-monitor-hud` MCP server. Pass `-NoClaude`
-to skip it. New Claude Code sessions pick it up.
-
 ## Maintenance
 
 | Operation | Command |
 | --- | --- |
-| Upgrade / repair | run the newer release's `scripts\install.ps1` |
+| Upgrade / repair | Run the newer release's `scripts/install.ps1` |
 | Roll back to 3.x | `~/plugins/codex-monitor-hud/scripts/rollback.ps1` |
 | Uninstall | `~/plugins/codex-monitor-hud/scripts/uninstall.ps1` (`-RemoveSettings` also deletes settings) |
 
+For an upgrade from 4.0–4.2 that used the legacy third-party integration, run the previous HUD version's uninstaller first. It unregisters the integration and keeps HUD settings by default.
+
 ## Language
 
-The HUD follows its saved language; a fresh install starts in English and can be switched to
-Simplified Chinese in Settings → General. Never infer language from session content, and never
-change an existing saved language during an upgrade.
+The HUD follows its saved language. A fresh install starts in English and can be switched to Simplified Chinese in Settings → General.

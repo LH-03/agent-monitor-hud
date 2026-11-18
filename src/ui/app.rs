@@ -1251,10 +1251,8 @@ impl App {
             return;
         }
         let hosts = control::live_hosts(&self.paths);
-        let claude_alive = self.view.tasks.iter().any(|t| t.source != crate::engine::Source::Codex);
-        let recent_hook = std::fs::read_dir(self.paths.claude_state_dir().join("events")).is_ok()
-            && fsx::stamp(&self.paths.claude_state_dir().join("events")).is_some_and(|s| now - s.write_ms < 10 * 60 * 1000);
-        if hosts == 0 && !claude_alive && !recent_hook {
+        let harness_active = self.view.tasks.iter().any(|t| t.source == crate::engine::Source::Dsh);
+        if hosts == 0 && !harness_active {
             self.exit(false);
         }
     }

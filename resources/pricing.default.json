@@ -2,14 +2,12 @@
   "_schema": "codex-monitor-hud-pricing-v1",
   "_source": {
     "checked_at": "2026-10-27",
-    "anthropic_checked_at": "2026-11-15",
     "openai_gpt_6_2_checked_at": "2026-11-18",
     "currency": "USD",
     "unit": "per_million_text_tokens",
     "openai": "https://developers.openai.com/api/docs/pricing",
-    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing/",
-    "note": "API text-token equivalent, not a subscription bill. Standard processing unless the log reports a supported tier. No unreported regional or server-tool charges. Pre-observation OpenAI cumulative history uses short-context standard rates; Claude prices each deduplicated response. Historical DeepSeek totals without request times remain unknown."
+    "note": "API text-token equivalent, not a subscription bill. Standard processing unless the log reports a supported tier. No unreported regional or server-tool charges. Pre-observation OpenAI cumulative history uses short-context standard rates. Historical DeepSeek totals without request times remain unknown."
   },
   "aliases": {
     "gpt-5.6": "gpt-5.6-sol",
@@ -137,121 +135,6 @@
         "output_multiplier": 1.5
       }
     },
-    "claude-fable-5-2": {
-      "input_per_million": 8.0,
-      "cached_input_per_million": 0.2,
-      "output_per_million": 40.0,
-      "cache_write_5m_per_million": 10.0,
-      "cache_write_1h_per_million": 16.0,
-      "fast_multiplier": 2.0
-    },
-    "claude-mythos-5-2": {
-      "input_per_million": 8.0,
-      "cached_input_per_million": 0.2,
-      "output_per_million": 40.0,
-      "cache_write_5m_per_million": 10.0,
-      "cache_write_1h_per_million": 16.0,
-      "fast_multiplier": 2.0
-    },
-    "claude-fable-5-1": {
-      "input_per_million": 10.0,
-      "cached_input_per_million": 0.25,
-      "output_per_million": 50.0,
-      "cache_write_5m_per_million": 12.5,
-      "cache_write_1h_per_million": 20.0
-    },
-    "claude-fable-5": {
-      "input_per_million": 10.0,
-      "cached_input_per_million": 1.0,
-      "output_per_million": 50.0,
-      "cache_write_5m_per_million": 12.5,
-      "cache_write_1h_per_million": 20.0
-    },
-    "claude-mythos-5-1": {
-      "input_per_million": 10.0,
-      "cached_input_per_million": 0.25,
-      "output_per_million": 50.0,
-      "cache_write_5m_per_million": 12.5,
-      "cache_write_1h_per_million": 20.0
-    },
-    "claude-opus-5-5": {
-      "input_per_million": 4.0,
-      "cached_input_per_million": 0.2,
-      "output_per_million": 20.0,
-      "cache_write_5m_per_million": 5.0,
-      "cache_write_1h_per_million": 8.0,
-      "fast_multiplier": 2.0
-    },
-    "claude-opus-5": {
-      "input_per_million": 5.0,
-      "cached_input_per_million": 0.5,
-      "output_per_million": 25.0,
-      "cache_write_5m_per_million": 6.25,
-      "cache_write_1h_per_million": 10.0,
-      "fast_multiplier": 2.0
-    },
-    "claude-opus-4-8": {
-      "input_per_million": 5.0,
-      "cached_input_per_million": 0.5,
-      "output_per_million": 25.0,
-      "cache_write_5m_per_million": 6.25,
-      "cache_write_1h_per_million": 10.0,
-      "fast_multiplier": 2.0
-    },
-    "claude-opus-4-7": {
-      "input_per_million": 5.0,
-      "cached_input_per_million": 0.5,
-      "output_per_million": 25.0,
-      "cache_write_5m_per_million": 6.25,
-      "cache_write_1h_per_million": 10.0
-    },
-    "claude-opus-4-6": {
-      "input_per_million": 5.0,
-      "cached_input_per_million": 0.5,
-      "output_per_million": 25.0,
-      "cache_write_5m_per_million": 6.25,
-      "cache_write_1h_per_million": 10.0
-    },
-    "claude-sonnet-5-5": {
-      "input_per_million": 2.0,
-      "cached_input_per_million": 0.1,
-      "output_per_million": 10.0,
-      "cache_write_5m_per_million": 2.5,
-      "cache_write_1h_per_million": 4.0
-    },
-    "claude-sonnet-5": {
-      "input_per_million": 2.0,
-      "cached_input_per_million": 0.2,
-      "output_per_million": 10.0,
-      "cache_write_5m_per_million": 2.5,
-      "cache_write_1h_per_million": 4.0
-    },
-    "claude-sonnet-4-6": {
-      "input_per_million": 3.0,
-      "cached_input_per_million": 0.3,
-      "output_per_million": 15.0,
-      "cache_write_5m_per_million": 3.75,
-      "cache_write_1h_per_million": 6.0
-    },
-    "claude-haiku-5-5": {
-      "input_per_million": 0.1,
-      "cached_input_per_million": 0.01,
-      "output_per_million": 0.5,
-      "cache_write_5m_per_million": 0.125,
-      "cache_write_1h_per_million": 0.2,
-      "long_context": {
-        "above_input_tokens": 100000,
-        "input_multiplier": 5,
-        "output_multiplier": 5
-      }
-    },
-    "claude-haiku-4-5": {
-      "input_per_million": 1.0,
-      "cached_input_per_million": 0.1,
-      "output_per_million": 5.0,
-      "cache_write_5m_per_million": 1.25,
-      "cache_write_1h_per_million": 2.0
-    },
     "gpt-6.2-astra": {
       "input_per_million": 8,
       "cached_input_per_million": 0.4,
@@ -292,8 +175,6 @@
       "input_per_million": 0.15,
       "cached_input_per_million": 0.003,
       "output_per_million": 0.6,
-      "cache_write_5m_per_million": 0.15,
-      "cache_write_1h_per_million": 0.15,
       "peak_schedule": "deepseek",
       "peak_multiplier": 2
     },
@@ -301,8 +182,6 @@
       "input_per_million": 0.66,
       "cached_input_per_million": 0.022,
       "output_per_million": 1.98,
-      "cache_write_5m_per_million": 0.66,
-      "cache_write_1h_per_million": 0.66,
       "peak_schedule": "deepseek",
       "peak_multiplier": 2
     },

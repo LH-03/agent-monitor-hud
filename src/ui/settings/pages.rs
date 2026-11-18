@@ -121,8 +121,6 @@ pub struct Ui<'a> {
     /// DeepSeek balance line ("¥23.50 · 00:57") or the last error.
     pub balance_status: &'a str,
     pub codex_quota: &'a str,
-    /// Claude plan usage line from the desktop app's samples.
-    pub claude_quota: &'a str,
 }
 
 pub struct Builder {
@@ -547,8 +545,6 @@ fn main_bubble(ui: &Ui, b: &mut Builder) -> El {
         vec![
             switch_row(ui, b, &["fields", "fiveHourRemaining"], "fiveHourRemaining", None),
             switch_row(ui, b, &["fields", "weeklyRemaining"], "weeklyRemaining", None),
-            switch_row(ui, b, &["fields", "claudeFiveHourRemaining"], "claudeFiveHourRemaining", Some("claudeQuotaSourceHint")),
-            switch_row(ui, b, &["fields", "claudeWeeklyRemaining"], "claudeWeeklyRemaining", None),
             switch_row(ui, b, &["fields", "dshBalance"], "dshBalance", Some("dshBalanceSourceHint")),
         ],
         None,
@@ -713,7 +709,7 @@ fn alerts(ui: &Ui, b: &mut Builder) -> El {
 
 fn source_row(ui: &Ui, b: &mut Builder, path: &'static [&'static str], icon: &str, color: &str, fill: bool, label: &str) -> El {
     let rgb = &color[3..];
-    let background = if path == &["sessionSources", "desktop"] || path == &["sessionSources", "claudeCli"] { c(hud::DARK_SOURCE_BADGE) } else { c(&format!("#14{rgb}")) };
+    let background = if path == &["sessionSources", "desktop"] { c(hud::DARK_SOURCE_BADGE) } else { c(&format!("#14{rgb}")) };
     let brand = hud::is_filled_brand(icon);
     let badge = El::border(background, Paint::None, 0.0, 7.0)
         .w(26.0)
@@ -739,16 +735,6 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
             source_row(ui, b, &["sessionSources", "defaultCli"], hud::ICON_CLI, hud::CODEX_CLI_COLOR, false, "sourceDefaultCliOption"),
             source_row(ui, b, &["sessionSources", "deepSeekCli"], hud::ICON_DEEPSEEK, hud::CODEX_CLI_COLOR, false, "sourceDeepSeekCliOption"),
             row(ui.t("codexQuotaRow"), ui.opt("codexQuotaSourceHint"), Some(text(ui.codex_quota, 12.5, 400, MUTED))),
-        ],
-        None,
-    );
-    let claude = group(
-        Some("Claude Code".into()),
-        vec![
-            source_row(ui, b, &["sessionSources", "claudeDesktop"], hud::ICON_CLAUDE, hud::CLAUDE_COLOR, false, "sourceClaudeDesktopOption"),
-            source_row(ui, b, &["sessionSources", "claudeCli"], hud::ICON_CLAUDE_CLI, hud::CLAUDE_COLOR, false, "sourceClaudeCliOption"),
-            switch_row(ui, b, &["accounts", "claudeLiveQuota"], "claudeLiveQuota", Some("claudeLiveQuotaHint")),
-            row(ui.t("claudeQuotaRow"), ui.opt("claudeQuotaSourceHint"), Some(text(ui.claude_quota, 12.5, 400, MUTED))),
         ],
         None,
     );
@@ -780,5 +766,5 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
         ui.opt("dshApiKeyPrivacy"),
     );
     let privacy = group(ui.opt("grpPrivacy"), vec![block(wrap(ui.t("sessionSourcesPrivacy"), 12.0, MUTED).m(Th::new(0.0, 0.0, 0.0, 6.0)))], None);
-    El::vstack().child(codex).child(claude).child(dsh).child(privacy)
+    El::vstack().child(codex).child(dsh).child(privacy)
 }

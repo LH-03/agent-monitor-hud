@@ -1,13 +1,11 @@
 #![windows_subsystem = "windows"]
 #![deny(unreachable_patterns)]
-//! Agent Monitor HUD — native Windows HUD for Codex, Claude Code and DeepSeek Harness tasks.
+//! Agent Monitor HUD — native Windows HUD for Codex and DeepSeek Harness tasks.
 
 mod config;
 mod control;
 mod engine;
 mod format;
-mod hook;
-mod integrate;
 mod locale;
 mod mcp;
 mod model;
@@ -26,15 +24,14 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
     let code = match mode {
-        "hook" => hook::run(),
         "mcp" => mcp::run(),
         "speed-check" if args.len() > 2 => speed_check(&args[1], &args[2], args.get(3).and_then(|v|v.parse().ok())),
         "account-check" if args.len() > 1 => account_check(&args[1]),
         "dump" if args.len() > 1 => dump_file(&args[1]),
         "dump" => dump(),
-        "integrate" | "unintegrate" => integrate::run(&args),
         "render-preview" => ui::preview::run(&args),
-        _ => ui::app::run(&args),
+        "" | "show" | "--managed" | "--open-settings" | "open-settings" => ui::app::run(&args),
+        _ => 2,
     };
     std::process::exit(code);
 }
@@ -44,14 +41,6 @@ fn account_check(source: &str) -> i32 {
     attach_console();
     let paths = paths::HudPaths::resolve();
     let result = match source {
-        "claude" => {
-            let settings = config::Settings::from(&config::load(&paths, &[]));
-            if !settings.claude_live_quota { serde_json::json!({"ok":false,"error":"opt_in_required"}) }
-            else { match engine::claude_quota::fetch(&paths.home, &paths.claude_root) {
-                Ok(u) => serde_json::json!({"ok":true,"five_hour_remaining":u.five_hour_used.map(|v|100.0-v),"weekly_remaining":u.weekly_used.map(|v|100.0-v),"observed_at":u.at}),
-                Err(e) => serde_json::json!({"ok":false,"error":e.label()}),
-            }}
-        },
         "dsh" => match secrets::load_deepseek_key(&paths).ok_or(engine::dsh_balance::Failure::Unauthorized).and_then(|key| engine::dsh_balance::fetch(&key)) {
             Ok(balance) => serde_json::json!({"ok":true,"balance":engine::dsh_balance::format(&balance)}),
             Err(_) => serde_json::json!({"ok":false,"error":"balance_unavailable"}),
@@ -71,7 +60,6 @@ fn speed_check(source: &str, path: &str, as_of: Option<i64>) -> i32 {
             let model=engine::codex::hydrate(path,now).ok().map(|h|h.model).unwrap_or_default();
             engine::speed::hydrate_codex(path,&model,now)
         },
-        "claude"=>engine::speed::hydrate_claude(path,now),
         "dsh"=> {
             let Some(p)=engine::dsh::read(path) else { return 2 };
             let mut t=engine::speed::Tracker::default();t.dsh(&p,util::fsx::stamp(path).map(|s|s.write_ms).unwrap_or(p.last_message_at));t.refresh(now);t
@@ -116,9 +104,7 @@ fn dump() -> i32 {
     let settings = config::Settings::from(&document);
     let mut engine = engine::Engine::new(paths.clone(), settings);
     let now = util::time::now_ms();
-    engine.apply_hook_events(hook::drain_events_peek(&paths), now);
     engine.full_scan(now);
-    engine.refresh_claude_quota(now);
     for _ in 0..200 {
         if !engine.has_backlog() {
             break;
@@ -148,7 +134,7 @@ fn dump() -> i32 {
         );
     }
     if let Some(d) = &view.display {
-        let _ = writeln!(out, "summary: input={} cached={} output={} call={} weekly={:?} 5h={:?} claude_5h={:?} claude_week={:?} claude_at={}", d.input, d.cached, d.output, d.call_total, d.weekly_remaining, d.five_hour_remaining, d.claude_five_hour_remaining, d.claude_weekly_remaining, d.claude_quota_at.map(util::time::local_hm).unwrap_or_default());
+        let _ = writeln!(out, "summary: input={} cached={} output={} call={} weekly={:?} 5h={:?}", d.input, d.cached, d.output, d.call_total, d.weekly_remaining, d.five_hour_remaining);
     }
     0
 }

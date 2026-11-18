@@ -94,7 +94,7 @@ pub fn send_command(command: &str) -> bool {
 }
 
 /// Starts the HUD detached from the caller's console and job, so it survives
-/// the MCP host or hook process that launched it.
+/// the MCP host that launched it.
 pub fn launch_hud(args: &[&str]) -> bool {
     let exe = HudPaths::exe_path();
     let spawn = |flags: u32| {

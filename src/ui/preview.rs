@@ -33,10 +33,10 @@ pub fn run(args: &[String]) -> i32 {
     let now = time::parse_iso("2026-07-13T08:00:00Z").unwrap();
     let mut tasks: Vec<TaskView> = (1..=6).map(|i| synthetic(i, now)).collect();
     if std::env::var("CODEX_MONITOR_HUD_PREVIEW_MIXED").is_ok() {
-        tasks[1].source = Source::Claude;
-        tasks[1].client = "claude-desktop";
+        tasks[1].client = "vscode";
         tasks[2].source = Source::Dsh;
         tasks[2].client = "dsh-desktop";
+        tasks[2].provider = "deepseek".into();
     }
     if std::env::var("CODEX_MONITOR_HUD_PREVIEW_WAITING").is_ok() {
         tasks[1].status = "waiting";
@@ -45,9 +45,6 @@ pub fn run(args: &[String]) -> i32 {
     let mut display = crate::engine::aggregate(&snapshots, "{tasks} tasks / {models} models");
     display.weekly_remaining = Some(80.0);
     display.five_hour_remaining = Some(75.0);
-    display.claude_five_hour_remaining = Some(64.0);
-    display.claude_weekly_remaining = Some(71.0);
-    display.claude_five_hour_remaining = Some(22.0);
     display.dsh_balance = Some("¥23.50".into());
     display.dsh_balance_value = Some(23.5);
     let ledger = crate::engine::ledger::LedgerView {
@@ -78,14 +75,13 @@ pub fn run(args: &[String]) -> i32 {
             t.status = ["active", "idle", "completed", "active", "idle", "completed"][i];
             if let Some(s) = t.snapshot.as_mut() {
                 s.context_percent = [83.1, 7.5, 49.7, 100.0, 61.2, 24.0][i];
-                s.model = ["gpt-6.1-sol", "gpt-6-sol", "Claude", "DeepSeek", "gpt-6.1-sol", "Claude"][i].into();
+                s.model = ["gpt-6.1-sol", "gpt-6-sol", "gpt-6.2-sol", "DeepSeek", "gpt-6.1-sol", "gpt-6.2-astra"][i].into();
             }
-            if i == 2 || i == 5 { t.source = Source::Claude; t.client = "claude-desktop"; }
+            if i == 2 || i == 5 { t.client = "vscode"; }
             if i == 3 { t.source = Source::Dsh; t.client = "dsh-desktop"; }
         }
         if let Some(s) = review.display.as_mut() {
             s.five_hour_remaining = Some(8.0); s.weekly_remaining = Some(85.0);
-            s.claude_five_hour_remaining = Some(45.0); s.claude_weekly_remaining = Some(40.0);
             s.dsh_balance = Some("¥23.50".into()); s.dsh_balance_value = Some(23.50);
         }
         for count in [1, 6] {
@@ -183,9 +179,9 @@ pub fn run(args: &[String]) -> i32 {
                 "bubble" => hud::build_bubble(&ctx, &tasks[0], false, None),
                 "notice" => {
                     let mut t = tasks[2].clone();
-                    t.source = Source::Claude;
-                    t.client = "claude-desktop";
-                    t.notice = Some(crate::engine::Notice { text: "需要你确认一下数据库迁移方案，我已经把两个选项写在 PLAN.md 里。".into(), until: now + 10_000, recipe: None, agent: Source::Claude, revision: 1 });
+                    t.source = Source::Codex;
+                    t.client = "desktop";
+                    t.notice = Some(crate::engine::Notice { text: "需要你确认一下数据库迁移方案，我已经把两个选项写在 PLAN.md 里。".into(), until: now + 10_000, recipe: None, agent: Source::Codex, revision: 1 });
                     match hud::build_notice(&ctx, &t) {
                         Some(el) => el,
                         None => continue,
@@ -193,15 +189,13 @@ pub fn run(args: &[String]) -> i32 {
                 }
                 "sources" => {
                     // One row per source family: Codex desktop / VS Code / CLI,
-                    // Codex DeepSeek profile, Claude desktop / CLI, DeepSeek Harness.
+                    // Codex DeepSeek profile, DeepSeek Harness.
                     let mut mixed = view.clone();
-                    let kinds: [(Source, &'static str, &'static str, &str); 7] = [
+                    let kinds: [(Source, &'static str, &'static str, &str); 5] = [
                         (Source::Codex, "desktop", "default", "openai"),
                         (Source::Codex, "vscode", "default", "openai"),
                         (Source::Codex, "cli", "default", "openai"),
                         (Source::Codex, "cli", crate::engine::codex::DEEPSEEK_PROFILE, "deepseek"),
-                        (Source::Claude, "claude-desktop", "claude", "anthropic"),
-                        (Source::Claude, "claude-cli", "claude", "anthropic"),
                         (Source::Dsh, "dsh-desktop", "dsh", "deepseek"),
                     ];
                     mixed.tasks = kinds

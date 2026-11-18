@@ -100,7 +100,6 @@ pub struct SettingsWindow {
     key_hint: Option<String>,
     balance_status: String,
     codex_quota: String,
-    claude_quota: String,
     sample: Option<preview::Sample>,
     sample_kind: u8,
     sample_open: bool,
@@ -214,7 +213,6 @@ pub fn open(app: &mut App) {
         key_hint: crate::secrets::deepseek_key_hint(&app.paths),
         balance_status: String::new(),
         codex_quota: String::new(),
-        claude_quota: String::new(),
         sample: None,
         sample_kind: 0,
         sample_open: false,
@@ -846,11 +844,6 @@ impl SettingsWindow {
             }
         };
         self.codex_quota = quota(a.codex_five_hour_remaining, a.codex_weekly_remaining, a.codex_at, "codexQuotaNone");
-        self.claude_quota = quota(a.claude_five_hour_remaining, a.claude_weekly_remaining, a.claude_at, "claudeQuotaNone");
-        if let Some(failure) = a.claude_failure {
-            let message = loc.get(match failure { "login" => "claudeQuotaLogin", "rate_limited" => "claudeQuotaRateLimited", "network" => "claudeQuotaNetwork", _ => "claudeQuotaUnexpected" });
-            self.claude_quota = if a.claude_five_hour_remaining.is_some() || a.claude_weekly_remaining.is_some() { format!("{} · {message}", self.claude_quota) } else { message.to_string() };
-        }
         self.balance_status = if self.key_hint.is_none() {
             loc.get("dshBalanceNoKey").to_string()
         } else if let Some(failure) = a.dsh_failure {
@@ -883,7 +876,6 @@ impl SettingsWindow {
             key_hint: self.key_hint.as_deref(),
             balance_status: &self.balance_status,
             codex_quota: &self.codex_quota,
-            claude_quota: &self.claude_quota,
             sample_kind: self.sample_kind,
             sample_open: self.sample_open,
         }
@@ -1911,7 +1903,6 @@ pub struct Look<'a> {
     pub key_hint: Option<&'a str>,
     pub balance_status: &'a str,
     pub codex_quota: &'a str,
-    pub claude_quota: &'a str,
     pub sample_kind: u8,
     pub sample_open: bool,
 }
@@ -2047,7 +2038,6 @@ pub fn build_tree(env: &Env, look: &Look) -> (El, pages::Builder) {
         key_hint: look.key_hint,
         balance_status: look.balance_status,
         codex_quota: look.codex_quota,
-        claude_quota: look.claude_quota,
     };
     let sidebar = pages::sidebar(&ui, &mut builder, look.status, look.status_tip);
     let header = pages::page_header(&ui, &mut builder);
@@ -2160,7 +2150,6 @@ pub fn render_preview(gfx: &Gfx, catalog: &Catalog, scene: &str, path: &std::pat
         key_hint: None,
         balance_status: loc.get("dshBalanceNoKey"),
         codex_quota: if language == "en" { "5h 61% · 7d 78% · updated 00:57" } else { "5h 61% · 周 78% · 更新于 00:57" },
-        claude_quota: "5h 22% · 周 52% · 更新于 00:57",
         sample_kind: if tab == 3 { 1 } else if tab == 4 { 2 } else { 0 },
         sample_open: (1..=4).contains(&tab),
     };

@@ -49,7 +49,7 @@ impl QuotaGuard {
             return json!({
                 "state": "unavailable", "event": "unavailable", "should_alert": false,
                 "five_hour_remaining_percent": null, "weekly_remaining_percent": null, "observed_at": "",
-                "instruction": "No locally observed Codex allowance is available. Do not guess a limit or interrupt work. Claude Code allowance is not observable locally."
+                "instruction": "No locally observed Codex allowance is available. Do not guess a limit or interrupt work."
             });
         }
         let q = &settings.quota;

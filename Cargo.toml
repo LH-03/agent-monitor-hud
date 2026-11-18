@@ -1,9 +1,9 @@
 [package]
 name = "agent-monitor-hud"
-version = "4.2.1"
+version = "4.3.0"
 edition = "2024"
 publish = false
-description = "Native real-time HUD for Codex, Claude Code and DeepSeek Harness tasks on Windows"
+description = "Native real-time HUD for Codex and DeepSeek Harness tasks on Windows"
 repository = "https://github.com/LH-03/agent-monitor-hud"
 license = "MIT"
 build = "build.rs"

@@ -3,7 +3,6 @@
 
 use crate::config::Settings;
 use crate::engine::{self, Engine, View, allowance, notices, registry};
-use crate::hook;
 use crate::locale::Catalog;
 use crate::paths::HudPaths;
 use crate::util::time;
@@ -28,7 +27,6 @@ pub enum Command {
     /// The stored DeepSeek key changed: re-read the balance now.
     DshKeyChanged,
     DshBalance(Result<engine::dsh_balance::Balance, engine::dsh_balance::Failure>),
-    ClaudeQuota(Result<engine::claude_quota::PlanUsage, engine::claude_quota::Failure>),
     Quit,
 }
 
@@ -72,7 +70,7 @@ pub fn spawn(paths: HudPaths, settings: Settings, catalog: Catalog, notify: impl
     watch::spawn(roots, stop.clone(), move |event| {
         let command = match event {
             watch::WatchEvent::Paths(paths) => {
-                // Session logs, title indexes, DSH checkpoints, hook events and
+                // Session logs, title indexes, DSH checkpoints and
                 // notices are all JSON/JSONL; other churn (SQLite WAL, temp
                 // files) must not wake the engine.
                 let paths: Vec<PathBuf> = paths
@@ -100,12 +98,8 @@ pub fn spawn(paths: HudPaths, settings: Settings, catalog: Catalog, notify: impl
 
 fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sender<Command>, shared: Arc<Shared>, notify: impl Fn()) {
     let paths = engine.paths.clone();
-    let mut claude_login_paths: Vec<PathBuf> = engine::claude_quota::candidates(&paths.home).into_iter().filter_map(|p| p.parent().map(|p| p.join("config.json"))).collect();
-    claude_login_paths.push(paths.claude_root.join(".credentials.json"));
     let notifications_dir = paths.notifications_dir();
-    let events_dir = paths.claude_state_dir().join("events");
     let _ = std::fs::create_dir_all(&notifications_dir);
-    let _ = std::fs::create_dir_all(&events_dir);
     let registry_path = paths.registry_path();
     let mut registry_cache = String::new();
     let mut quota = registry::QuotaGuard::default();
@@ -119,15 +113,9 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
     let mut balance_next = time::now_ms() + 3_000;
     let mut balance_last = time::MIN;
     let mut balance_retry_after = time::MIN;
-    let mut claude_running = false;
-    let mut claude_next = time::now_ms() + 1_000;
-    let mut claude_last = time::MIN;
-    let mut claude_retry_after = time::MIN;
-    let mut claude_usage_seen = time::MIN;
     let mut dsh_usage_seen = time::MIN;
 
     let now = time::now_ms();
-    engine.apply_hook_events(hook::drain_events(&paths), now);
     engine.full_scan(now);
     engine.poll_backlog(now);
 
@@ -160,7 +148,6 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
         let mut changed_paths: Vec<PathBuf> = Vec::new();
         let mut rescan = false;
         let mut check_notices = now - last_notice_scan >= 30_000;
-        let mut check_hooks = false;
         for cmd in commands {
             match cmd {
                 Command::Quit => {
@@ -170,14 +157,8 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 }
                 Command::Paths(paths_changed) => {
                     for path in paths_changed {
-                        if claude_login_paths.contains(&path) {
-                            claude_retry_after = time::MIN;
-                            claude_next = now.max(claude_last + 5000);
-                        }
                         if path.starts_with(&notifications_dir) {
                             check_notices = true;
-                        } else if path.starts_with(&events_dir) {
-                            check_hooks = true;
                         } else if !path.starts_with(&paths.state_root)
                             && (path.is_dir() || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json")))
                         {
@@ -189,9 +170,6 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 }
                 Command::Rescan => rescan = true,
                 Command::Settings(settings) => {
-                    if settings.claude_live_quota != engine.settings.claude_live_quota {
-                        claude_next = now; claude_retry_after = time::MIN;
-                    }
                     engine.update_settings(*settings);
                     rescan = true;
                 }
@@ -227,20 +205,6 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                     }
                     engine.revision += 1;
                 }
-                Command::ClaudeQuota(result) => {
-                    claude_running = false;
-                    if engine.settings.claude_live_quota {
-                        match result {
-                            Ok(usage) => { claude_retry_after = time::MIN; engine.observe_claude_quota(usage); }
-                            Err(failure) => {
-                                claude_retry_after = now + failure.retry_ms();
-                                claude_next = claude_retry_after;
-                                engine.claude_quota_failure = Some(failure.label());
-                                engine.revision += 1;
-                            }
-                        }
-                    }
-                }
                 Command::Official(result) => {
                     official_running = false;
                     if let Some(reading) = result {
@@ -256,15 +220,7 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 Command::RefreshAccounts => {
                     official_next = official_next.min(now.max(official_last + 5_000));
                     balance_next = balance_next.min(now.max(balance_last + 5_000));
-                    claude_next = claude_next.min(now.max(claude_last + 5_000));
                 }
-            }
-        }
-        if check_hooks || !engine.initial_scan_complete {
-            let events = hook::drain_events(&paths);
-            if !events.is_empty() {
-                engine.apply_hook_events(events, now);
-                responsive_until = now + 2000;
             }
         }
         if !engine.paused {
@@ -280,7 +236,6 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                 engine.on_paths(&changed_paths, now);
                 responsive_until = now + 2000;
             }
-            engine.refresh_claude_quota(now);
             let _p = crate::util::prof::probe(crate::util::prof::POLL);
             engine.poll_hot(now);
             drop(_p);
@@ -307,22 +262,17 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
         if codex_active { official_next = official_next.min(official_last + 30_000); }
         let dsh_active = engine.dsh_recently_active(now) || view.tasks.iter().any(|t|
             t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && matches!(t.status, "active" | "waiting" | "listening"));
-        let claude_active = view.tasks.iter().any(|t| t.source == engine::Source::Claude && matches!(t.status, "active" | "waiting" | "listening"));
         if dsh_active && now >= balance_retry_after {
             balance_next = balance_next.min(balance_last + 5_000);
         }
-        if claude_active && now >= claude_retry_after {
-            claude_next = claude_next.min(claude_last + 10_000);
-        }
-        for (source, seen, next, last, retry) in [
-            (engine::Source::Claude, &mut claude_usage_seen, &mut claude_next, claude_last, claude_retry_after),
-            (engine::Source::Dsh, &mut dsh_usage_seen, &mut balance_next, balance_last, balance_retry_after),
-        ] {
-            let latest = view.tasks.iter().filter(|t| t.source.quota_source(&t.provider, t.profile) == Some(source)).map(|t| t.last_usage_at).max().unwrap_or(time::MIN);
-            if latest > *seen && now >= retry {
-                *seen = latest;
-                *next = (*next).min((now + 1000).max(last + 5000));
-            }
+        let latest_dsh_usage = view.tasks.iter()
+            .filter(|t| t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh))
+            .map(|t| t.last_usage_at)
+            .max()
+            .unwrap_or(time::MIN);
+        if latest_dsh_usage > dsh_usage_seen && now >= balance_retry_after {
+            dsh_usage_seen = latest_dsh_usage;
+            balance_next = balance_next.min((now + 1_000).max(balance_last + 5_000));
         }
         if last_view.as_ref().is_some_and(|previous| previous.tasks.iter().any(|t|
             t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Dsh) && t.status == "active"
@@ -341,15 +291,6 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                     let _ = tx.send(Command::DshBalance(engine::dsh_balance::fetch(&key)));
                 });
             }
-        }
-        if !claude_running && engine.settings.claude_live_quota && now >= claude_next && now >= claude_retry_after {
-            claude_running = true;
-            claude_last = now;
-            claude_next = now + if claude_active { 10_000 } else { 60_000 };
-            let tx = self_tx.clone();
-            let home = paths.home.clone();
-            let root = paths.claude_root.clone();
-            std::thread::spawn(move || { let _ = tx.send(Command::ClaudeQuota(engine::claude_quota::fetch(&home, &root))); });
         }
         if !official_running && now >= official_next && codex_enabled {
             official_running = true;

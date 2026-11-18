@@ -12,15 +12,15 @@ pub struct Metric {
     pub value: String,
 }
 
-const METRIC_ORDER: [&str; 17] = [
+const METRIC_ORDER: [&str; 15] = [
     "input", "cached", "cacheHitRate", "uncached", "output", "reasoning", "callTotal", "taskTotal", "context", "model",
-    "updated", "activeTasks", "weeklyRemaining", "fiveHourRemaining", "claudeFiveHourRemaining", "claudeWeeklyRemaining",
+    "updated", "activeTasks", "weeklyRemaining", "fiveHourRemaining",
     "estimatedCost",
 ];
 
-const SUMMARY_KEYS: [&str; 12] = [
+const SUMMARY_KEYS: [&str; 10] = [
     "input", "cached", "uncached", "output", "reasoning", "callTotal", "activeTasks", "weeklyRemaining",
-    "fiveHourRemaining", "claudeFiveHourRemaining", "claudeWeeklyRemaining", "estimatedCost",
+    "fiveHourRemaining", "estimatedCost",
 ];
 
 /// `1,234,567` (exact), `1.2M` (compact), or exact below one million (auto).
@@ -134,16 +134,13 @@ fn value_for(key: &str, s: &Snapshot, mode: &str) -> String {
         "activeTasks" => number(s.active_tasks as i64, mode),
         "weeklyRemaining" => s.weekly_remaining.map(percent).unwrap_or_else(|| "--".into()),
         "fiveHourRemaining" => s.five_hour_remaining.map(percent).unwrap_or_else(|| "--".into()),
-        "claudeFiveHourRemaining" => s.claude_five_hour_remaining.map(percent).unwrap_or_else(|| "--".into()),
-        "claudeWeeklyRemaining" => s.claude_weekly_remaining.map(percent).unwrap_or_else(|| "--".into()),
         _ => cost(s.cost_usd),
     }
 }
 
 pub fn context_value(s: &Snapshot) -> String {
     if s.context_window > 0 {
-        let text = percent(s.context_percent);
-        if s.context_estimated { format!("≈{text}") } else { text }
+        percent(s.context_percent)
     } else {
         "--".into()
     }

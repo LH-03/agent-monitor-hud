@@ -1,5 +1,5 @@
-# Removes Agent Monitor HUD 4.x for the current user: the HUD's Claude Code
-# hooks/MCP entries, the plugin folder, its Codex cache copies, the personal
+# Removes Agent Monitor HUD 4.x for the current user: the plugin folder, its
+# Codex cache copies, the personal
 # marketplace entry and the settings shortcuts.
 #
 # Kept: settings in %LOCALAPPDATA%\CodexMonitorHUD (pass -RemoveSettings to
@@ -23,8 +23,6 @@ if ($PSCommandPath -and -not $PSCommandPath.StartsWith($env:TEMP, [StringCompari
     exit $LASTEXITCODE
 }
 
-$exe = Join-Path $plugin 'bin\AgentMonitorHUD.exe'
-if (Test-Path $exe) { & $exe unintegrate claude | Out-Null }
 if (-not $sandbox) {
     Get-Process AgentMonitorHUD -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$plugin*" } |
         ForEach-Object { $_.CloseMainWindow() | Out-Null; if (-not $_.WaitForExit(1500)) { $_ | Stop-Process -Force } }

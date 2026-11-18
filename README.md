@@ -2,8 +2,8 @@
 
 > [简体中文](README.zh-CN.md) · Windows x64 · formerly **Codex Monitor HUD**
 
-A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex**,
-**Claude Code** and **DeepSeek Harness** — with token usage, context, task state and what's left of
+A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex** and
+**DeepSeek Harness** — with token usage, context, task state and what's left of
 your plan, using local metadata and optional official account queries.
 
 ![Main bubble with activity rhythm and quota groups](docs/images/hud-rhythm-dark.png)
@@ -11,7 +11,7 @@ your plan, using local metadata and optional official account queries.
 > **4.0 is a complete rewrite.** The 3.x C#/WPF app (plus a bundled .NET runtime and a Node.js MCP
 > host) was rewritten from scratch as one native Rust executable. The look, settings and plugin id stay the same.
 
-The HUD, settings, Claude hooks and MCP server use the same native executable. There is no
+The HUD, settings and MCP server use the same native executable. There is no
 bundled .NET runtime, Node.js host or WebView. See [the architecture](docs/ARCHITECTURE.md).
 
 ### Measured improvements
@@ -35,10 +35,9 @@ Memory rows cover the HUD process, excluding MCP helpers and agent applications.
 | Agent | Surfaces | Plan / balance |
 | --- | --- | --- |
 | **Codex** | Desktop, VS Code, CLI, optional isolated DeepSeek CLI profile | 5-hour and weekly allowance |
-| **Claude Code** | Desktop Code tab, CLI | 5-hour and weekly plan usage (local samples; optional official live query) |
 | **DeepSeek Harness** | Desktop | API balance (optional, needs your API key) |
 
-Every task carries a source badge, so a Claude CLI task never looks like a Codex Desktop one.
+Every task carries a badge for its source.
 
 ## What you see
 
@@ -98,11 +97,12 @@ characters), and sent only to `api.deepseek.com/user/balance`. **Remove** delete
    ```
 
 It installs to `~/plugins/codex-monitor-hud`, creates *Agent Monitor HUD Settings* shortcuts on the
-desktop and Start menu, registers the plugin for Codex, and — if Claude Code is installed — adds
-the HUD's lifecycle hooks and MCP server to Claude Code (`-NoClaude` skips that).
+desktop and Start menu, and registers the plugin for Codex.
 
-Or hand the repository URL to Codex or Claude Code and say **"install this for me"**; the agent
+Or hand the repository URL to Codex and say **"install this for me"**; the agent
 procedure is in [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md).
+
+**Upgrading from 4.0–4.2**: Run the previous HUD version's uninstaller before installing 4.3 if you used its legacy third-party integration. The old uninstaller unregisters that integration and keeps HUD settings by default.
 
 **Upgrading from 3.x** is automatic: your settings carry over, and the whole 3.x plugin folder is
 kept as `~/plugins/.codex-monitor-hud-rollback-<version>`. To go back:
@@ -128,9 +128,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\plugins\codex-monitor-
 
 Task data stays on your machine: the HUD displays counters and metadata, never prompt or reply
 contents. Optional account reads use only the official providers: a saved DeepSeek key queries
-its balance; explicitly enabling live Claude allowance reuses your local login token in memory
-at Anthropic's usage endpoint. The HUD never writes back or refreshes Claude credentials.
-See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
+its balance. See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
 
 ## Build from source
 
@@ -147,7 +145,7 @@ your real state, which is how the screenshots here were made.
 
 ## Project status
 
-Unofficial and independent; not affiliated with or endorsed by OpenAI, Anthropic or DeepSeek.
+Unofficial and independent; not affiliated with or endorsed by OpenAI or DeepSeek.
 Cost figures are API-list-price estimates, not your subscription bill. Windows x64 only.
 
 The 3.x history remains in this repository.

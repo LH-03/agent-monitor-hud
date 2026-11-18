@@ -1,9 +1,6 @@
 # Architecture
 
-Agent Monitor HUD 4.x is a single native Windows executable written in Rust. It replaced the
-3.x C#/WPF application (plus its Node.js MCP host and bundled .NET runtime) while keeping the
-same look, settings file and plugin identity. The rewrite was done by Claude Opus 5.5 working
-in Claude Code; the 3.x source stays in this repository's history as the behavioural reference.
+Agent Monitor HUD is a native Rust executable for Windows. The 3.x version used a WPF interface and a Node.js MCP host.
 
 ## Measured footprint
 
@@ -20,9 +17,7 @@ One executable, `AgentMonitorHUD.exe` (no .NET, Node.js, PowerShell or WebView a
 | Mode | What it does |
 | --- | --- |
 | *(default)* | The HUD. Single instance (`Local\AgentMonitorHUD` mutex); a second launch forwards its request (`--open-settings`, `show`, …) to the running instance and exits. |
-| `mcp` | STDIO MCP server for Codex and Claude Code. Tiny, no GUI; starts the HUD if it is not running. |
-| `hook` | Claude Code hook handler: reads the hook JSON on stdin, writes a whitelisted state file, starts the HUD on `SessionStart` / `UserPromptSubmit`. Never blocks or injects into Claude. |
-| `integrate claude` / `unintegrate claude` | Adds or removes only the HUD's own hooks and user-scope MCP entry. |
+| `mcp` | STDIO MCP server for Codex. Tiny, no GUI; starts the HUD if it is not running. |
 | `render-preview <dir> [scenes]` | Off-screen PNG renders of synthetic states (visual regression checks). |
 | `dump` | Prints the engine's current view as JSON (diagnostics). |
 
@@ -55,22 +50,6 @@ tight and a fully spread layout; type never scales and the bubble never reflows 
   activity index is queried every 2 seconds during activity and every 5 seconds idle, without relying
   on database/WAL file timestamps. Partially written new headers retain a forward reader at byte zero.
 
-### Claude Code
-
-- `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<project>/<sessionId>.jsonl`; subagent files never
-  become top-level tasks.
-- Identity: `sessionId`, `entrypoint` (desktop Code tab or CLI), `cwd` leaf; title from
-  `custom-title` / `ai-title` / `agent-name` records only (never message text).
-- Usage per assistant message keyed by `message.id` (+ `requestId`): later writes of the same
-  response replace earlier values. Context % = input total / model window.
-- Lifecycle from hooks (`SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure`,
-  `SessionEnd`), with transcript growth as the fallback. `waiting` means Claude needs your approval
-  or input.
-- Plan usage defaults to local Desktop snapshots. Opt-in live queries use the current Desktop
-  account's encrypted OAuth cache (Windows DPAPI + CNG), falling back to the local CLI sign-in.
-  Tokens stay in memory, are sent only to `api.anthropic.com/api/oauth/usage`, and are never refreshed
-  or written back. Queries run about every 5–10 seconds active, every minute idle, with failure backoff.
-
 ### DeepSeek Harness
 
 - `<DSH_HOME or ~/.dsh>/storages/session_projcache/sessions/<session>.json`: the harness's own
@@ -93,7 +72,7 @@ the rhythm sparkline), `secrets\` (the DPAPI-protected key, if any) and `hud.log
 
 `scripts\install.ps1` installs to `~/plugins/codex-monitor-hud` (the plugin id is unchanged), adds
 the personal marketplace entry Codex uses, refreshes Codex's plugin cache, creates the settings
-shortcuts and, when Claude Code is present, runs `integrate claude`. Coming from 3.x, the old
+shortcuts. Coming from 3.x, the old
 plugin folder is kept whole as `~/plugins/.codex-monitor-hud-rollback-<version>` and
 `scripts\rollback.ps1` restores it. While a 3.x Node MCP server is still alive in an open Codex
 session, the native HUD keeps the legacy heartbeat fresh so that server never relaunches 3.x.

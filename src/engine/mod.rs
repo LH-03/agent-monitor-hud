@@ -1,12 +1,9 @@
 //! The single task table shared by every surface. It discovers Codex,
-//! Claude Code and DeepSeek Harness sessions, reads only appended data, advances the lifecycle and
+//! DeepSeek Harness sessions, reads only appended data, advances the lifecycle and
 //! publishes immutable views to the UI thread.
 
 pub mod activity;
 pub mod allowance;
-pub mod claude;
-mod claude_login;
-pub mod claude_quota;
 pub mod codex;
 pub mod dsh;
 pub mod dsh_balance;
@@ -28,18 +25,14 @@ use std::path::{Path, PathBuf};
 
 const PER_TASK_BUDGET: u64 = 256 * 1024;
 const GLOBAL_BUDGET: u64 = 4 * 1024 * 1024;
-/// Claude transcripts are summed from the beginning, so first hydration gets
-/// a larger per-pass budget (still bounded, spread across ticks).
-const CLAUDE_HYDRATION_BUDGET: u64 = 8 * 1024 * 1024;
 const RUNTIME_FRESH_MS: i64 = 3 * 60 * 1000;
 const OPEN_TURN_RETENTION_MS: i64 = 2 * 60 * 60 * 1000;
-const CLAUDE_TURN_ACTIVE_MS: i64 = 10 * 60 * 1000;
+const DSH_TURN_ACTIVE_MS: i64 = 10 * 60 * 1000;
 const MAX_TASKS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Codex,
-    Claude,
     /// DeepSeek Harness desktop.
     Dsh,
 }
@@ -59,7 +52,6 @@ impl Source {
     pub fn agent_name(self) -> &'static str {
         match self {
             Source::Codex => "codex",
-            Source::Claude => "claude",
             Source::Dsh => "dsh",
         }
     }
@@ -132,13 +124,10 @@ pub struct Task {
     pub runtime_activity_at: i64,
     pub dismissed: bool,
     pub waiting_since: i64,
-    pub hydrating: bool,
     weekly: Option<(f64, i64)>,
     five_hour: Option<(f64, i64)>,
     reader: jsonl::IncrementalReader,
-    claude: Option<Box<claude::TranscriptState>>,
     dsh: Option<Box<dsh::Projection>>,
-    hydrate_until: u64,
 }
 
 impl Task {
@@ -187,13 +176,10 @@ impl Task {
             runtime_activity_at: MIN,
             dismissed: false,
             waiting_since: MIN,
-            hydrating: false,
             weekly: None,
             five_hour: None,
             reader: jsonl::IncrementalReader::default(),
-            claude: None,
             dsh: None,
-            hydrate_until: 0,
         }
     }
 
@@ -280,10 +266,6 @@ pub struct AccountView {
     pub codex_five_hour_remaining: Option<f64>,
     pub codex_weekly_remaining: Option<f64>,
     pub codex_at: Option<i64>,
-    pub claude_five_hour_remaining: Option<f64>,
-    pub claude_weekly_remaining: Option<f64>,
-    pub claude_at: Option<i64>,
-    pub claude_failure: Option<&'static str>,
     pub dsh_balance: Option<String>,
     pub dsh_at: Option<i64>,
     /// "unauthorized", "network" or "unexpected" after a failed balance read.
@@ -321,11 +303,8 @@ pub struct Engine {
     pub settings: Settings,
     profiles: Vec<codex::Profile>,
     titles: HashMap<&'static str, codex::TitleIndex>,
-    claude_projects: PathBuf,
     dsh_root: PathBuf,
     dsh_archived: HashSet<String>,
-    claude_quota: claude_quota::Reader,
-    pub claude_quota_failure: Option<&'static str>,
     /// Latest DeepSeek balance reading and its time; the last failure kind.
     pub dsh_balance: Option<(dsh_balance::Balance, i64)>,
     pub dsh_balance_failure: Option<dsh_balance::Failure>,
@@ -346,7 +325,6 @@ pub struct Engine {
     pub official_allowance: Option<allowance::Official>,
     last_full_scan: i64,
     last_activity_query: i64,
-    pub last_hook_at: i64,
 }
 
 pub fn path_key(path: &Path) -> String {
@@ -360,11 +338,8 @@ impl Engine {
         let titles = profiles.iter().map(|p| (p.id, codex::TitleIndex::default())).collect();
         let pricing = pricing::Catalog::load(&settings.pricing_path, &paths.home);
         Engine {
-            claude_projects: paths.claude_root.join("projects"),
             dsh_root: paths.dsh_root.clone(),
             dsh_archived: HashSet::new(),
-            claude_quota: claude_quota::Reader::default(),
-            claude_quota_failure: None,
             dsh_balance: None,
             dsh_balance_failure: None,
             ledger: ledger::Ledger::load(&paths.state_root, time::now_ms()),
@@ -388,7 +363,6 @@ impl Engine {
             official_allowance: None,
             last_full_scan: MIN,
             last_activity_query: MIN,
-            last_hook_at: MIN,
         }
     }
 
@@ -400,12 +374,7 @@ impl Engine {
                 roots.push((parent.to_path_buf(), false));
             }
         }
-        roots.push((self.claude_projects.clone(), true));
         roots.push((dsh::sessions_dir(&self.dsh_root), false));
-        roots.push((self.paths.claude_root.clone(), false));
-        for path in claude_quota::candidates(&self.paths.home) {
-            if let Some(parent) = path.parent() { roots.push((parent.to_path_buf(), false)); }
-        }
         roots
     }
 
@@ -441,10 +410,6 @@ impl Engine {
     fn source_enabled(&self, task: &Task) -> bool {
         let s = &self.settings.sources;
         match task.source {
-            Source::Claude => match task.client {
-                "claude-desktop" => s.claude_desktop,
-                _ => s.claude_cli,
-            },
             Source::Dsh => s.dsh,
             Source::Codex if task.profile == codex::DEEPSEEK_PROFILE => s.deepseek_cli,
             Source::Codex => match task.client {
@@ -480,11 +445,6 @@ impl Engine {
                         candidates.push((path, stamp, Source::Codex, profile.id));
                     }
                 }
-            }
-        }
-        if self.settings.sources.claude_desktop || self.settings.sources.claude_cli {
-            for (path, stamp) in claude::list_transcripts(&self.claude_projects, cutoff) {
-                candidates.push((path, stamp, Source::Claude, "claude"));
             }
         }
         if self.settings.sources.dsh {
@@ -559,38 +519,17 @@ impl Engine {
         self.query_activity(now)
     }
 
-    /// Every 2 s while Codex work is live (background-worker heartbeats), else every 10 s.
-    /// Picks up a new Claude plan-usage sample (cheap stamp check every 15 s).
-    pub fn refresh_claude_quota(&mut self, now: i64) -> bool {
-        let changed = self.claude_quota.refresh(&self.paths.home, now);
-        if changed {
-            self.revision += 1;
-        }
-        changed
-    }
-
-    pub fn observe_claude_quota(&mut self, usage: claude_quota::PlanUsage) {
-        self.claude_quota.observe(usage);
-        self.claude_quota_failure = None;
-        self.revision += 1;
-    }
-
     /// Whether DeepSeek Harness was used recently (balance polls more often then).
     pub fn dsh_recently_active(&self, now: i64) -> bool {
         self.tasks.values().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(Source::Dsh) && now - t.activity_reference() <= 2 * 60 * 1000)
     }
 
-    fn account_view(&self, now: i64) -> AccountView {
+    fn account_view(&self) -> AccountView {
         let (codex_five, codex_week, codex_at) = codex_allowance(self.tasks.values(), self.official_allowance.as_ref());
-        let (five, week, at) = self.claude_quota.remaining(now);
         AccountView {
             codex_five_hour_remaining: codex_five,
             codex_weekly_remaining: codex_week,
             codex_at,
-            claude_five_hour_remaining: five,
-            claude_weekly_remaining: week,
-            claude_at: at,
-            claude_failure: if self.settings.claude_live_quota { self.claude_quota_failure } else { None },
             dsh_balance: self.dsh_balance.as_ref().map(|(b, _)| dsh_balance::format(b)),
             dsh_at: self.dsh_balance.as_ref().map(|(_, at)| *at),
             dsh_failure: self.dsh_balance_failure.as_ref().map(|f| match f {
@@ -673,12 +612,6 @@ impl Engine {
                 continue;
             }
             let Some(stamp) = fsx::stamp(path) else { continue };
-            if claude::is_main_transcript(&self.claude_projects, path) {
-                if self.settings.sources.claude_desktop || self.settings.sources.claude_cli {
-                    changed |= self.ensure_task(path, stamp, Source::Claude, "claude", now);
-                }
-                continue;
-            }
             let profile = self
                 .profiles
                 .iter()
@@ -711,11 +644,6 @@ impl Engine {
         let mut task = Task::new(key.clone(), path.to_path_buf(), source, profile, number, stamp);
         match source {
             Source::Codex => self.init_codex(&mut task, now),
-            Source::Claude => {
-                self.init_claude(&mut task, now);
-                // Claude totals need the whole transcript: hydrate in bounded passes.
-                self.backlog.insert(key.clone());
-            }
             Source::Dsh => self.init_dsh(&mut task, now),
         }
         self.tasks.insert(key, task);
@@ -785,20 +713,6 @@ impl Engine {
                 task.last_read_error_at = if task.read_blocked { MIN } else { now };
             }
         }
-    }
-
-    fn init_claude(&self, task: &mut Task, _now: i64) {
-        let mut state = claude::TranscriptState::default();
-        state.session_id = task.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-        task.session_id = state.session_id.clone();
-        task.identity_found = true;
-        task.client = "claude-unknown";
-        task.provider = "anthropic".into();
-        task.workspace = String::new();
-        task.claude = Some(Box::new(state));
-        task.hydrating = true;
-        task.hydrate_until = task.stamp.size;
-        task.reader = jsonl::IncrementalReader::default();
     }
 
     fn init_dsh(&mut self, task: &mut Task, now: i64) {
@@ -905,7 +819,7 @@ impl Engine {
         let keys: Vec<String> = self
             .tasks
             .values()
-            .filter(|t| !t.internal && (t.activity_reference() >= now - window || t.turn_open || t.hydrating))
+            .filter(|t| !t.internal && (t.activity_reference() >= now - window || t.turn_open))
             .map(|t| t.key.clone())
             .collect();
         let mut changed = false;
@@ -915,7 +829,7 @@ impl Engine {
                 self.backlog.insert(key);
                 continue;
             }
-            let per = if self.tasks.get(&key).is_some_and(|t| t.hydrating) { CLAUDE_HYDRATION_BUDGET } else { PER_TASK_BUDGET };
+            let per = PER_TASK_BUDGET;
             changed |= self.poll_task(&key, now, per.min(budget));
             budget = budget.saturating_sub(self.tasks.get(&key).map(|t| t.reader.last_read_bytes).unwrap_or(0));
         }
@@ -1000,101 +914,6 @@ impl Engine {
                 }
             }
             Source::Dsh => {}
-            Source::Claude => {
-                let Some(state) = task.claude.as_mut() else { return changed };
-                if restarted {
-                    let session_id = std::mem::take(&mut state.session_id);
-                    **state = claude::TranscriptState::default();
-                    state.session_id = session_id;
-                    task.hydrating = true;
-                    task.hydrate_until = stamp.size;
-                }
-                if restarted { task.speed = speed::Tracker::default(); }
-                let mut saw_usage = false;
-                let mut saw_prompt = false;
-                let mut saw_end = false;
-                let mut identity = false;
-                for line in &records {
-                    match state.apply_line(line, now, &self.pricing) {
-                        claude::Change::Usage => saw_usage = true,
-                        claude::Change::Prompt => {
-                            saw_prompt = true;
-                            saw_end = false;
-                        }
-                        claude::Change::EndTurn => {
-                            saw_usage = true;
-                            saw_end = true;
-                        }
-                        claude::Change::Identity => identity = true,
-                        _ => {}
-                    }
-                }
-                if identity || task.hydrating {
-                    task.client = state.client();
-                    task.title = state.title();
-                    if !state.workspace.is_empty() {
-                        task.workspace = state.workspace.clone();
-                    }
-                    if !state.session_id.is_empty() {
-                        task.session_id = state.session_id.clone();
-                    }
-                    changed = true;
-                }
-                if !state.model.is_empty() {
-                    task.model = state.model.clone();
-                }
-                let was_hydrating = task.hydrating;
-                if task.hydrating && task.reader.offset >= task.hydrate_until && !task.reader.has_unread {
-                    task.hydrating = false;
-                }
-                if saw_usage || was_hydrating {
-                    if let Some(snapshot) = state.snapshot() {
-                        task.snapshot = Some(snapshot);
-                        task.observed_activity = true;
-                        changed = true;
-                    }
-                }
-                if was_hydrating {
-                    if !task.hydrating {
-                        // History tells where the conversation stands; no reminders for the past.
-                        let last_usage = state.last.map(|(_, at)| at).unwrap_or(MIN);
-                        task.last_usage_at = last_usage;
-                        task.last_activity_at = task.last_activity_at.max(last_usage);
-                        if state.last_end_turn_at != 0 && state.last_end_turn_at >= state.last_prompt_at {
-                            task.terminal = "completed";
-                            task.terminal_at = state.last_end_turn_at;
-                            if state.last_end_turn_at + (settings.terminal_hold_seconds * 1000.0) as i64 <= now {
-                                task.exit_started = true;
-                                task.exit_completed = true;
-                            }
-                        } else if state.last_prompt_at > state.last_end_turn_at {
-                            task.turn_open = true;
-                        }
-                    }
-                    return true;
-                }
-                if saw_prompt {
-                    turn_started(task, now);
-                    changed = true;
-                }
-                if saw_usage {
-                    task.last_usage_at = now;
-                    self.last_usage_at = now;
-                    task.last_read_error_at = MIN;
-                    if task.waiting_since != MIN {
-                        task.waiting_since = MIN;
-                    }
-                    update_context_alert(task, now, settings, &mut self.attention_seq);
-                }
-                if saw_end {
-                    begin_completion(task, String::new(), now, now, settings, &mut self.attention_seq);
-                    changed = true;
-                }
-                if grew && task.waiting_since != MIN && now - task.waiting_since > 1500 {
-                    task.waiting_since = MIN;
-                    changed = true;
-                }
-            }
         }
         if changed {
             self.revision += 1;
@@ -1106,102 +925,8 @@ impl Engine {
         let keys: Vec<String> = self.backlog.iter().cloned().collect();
         let mut changed = false;
         for key in keys {
-            let budget = if self.tasks.get(&key).is_some_and(|t| t.hydrating) { CLAUDE_HYDRATION_BUDGET } else { PER_TASK_BUDGET };
+            let budget = PER_TASK_BUDGET;
             changed |= self.poll_task(&key, now, budget);
-        }
-        changed
-    }
-
-    // --------------------------------------------------------------- hook events
-
-    /// Applies Claude hook events (oldest first).
-    pub fn apply_hook_events(&mut self, events: Vec<claude::HookEvent>, now: i64) -> bool {
-        let mut changed = false;
-        for event in events {
-            self.last_hook_at = self.last_hook_at.max(event.at);
-            if event.transcript_path.trim().is_empty() {
-                continue;
-            }
-            let path = PathBuf::from(&event.transcript_path);
-            let key = path_key(&path);
-            if !self.tasks.contains_key(&key) {
-                if !(self.settings.sources.claude_desktop || self.settings.sources.claude_cli) {
-                    continue;
-                }
-                let stamp = fsx::stamp(&path).unwrap_or(FileStamp { size: 0, write_ms: event.at, create_ms: event.at });
-                if event.event == "SessionEnd" {
-                    continue;
-                }
-                changed |= self.ensure_task(&path, stamp, Source::Claude, "claude", now);
-            }
-            let settings = self.settings.clone();
-            let Some(task) = self.tasks.get_mut(&key) else { continue };
-            if task.source != Source::Claude {
-                continue;
-            }
-            let at = if event.at > 0 { event.at } else { now };
-            task.last_activity_at = task.last_activity_at.max(at);
-            if task.workspace.is_empty() && !event.workspace.is_empty() {
-                task.workspace = event.workspace.clone();
-            }
-            if task.session_id.is_empty() {
-                task.session_id = event.session_id.clone();
-            }
-            // Events replayed after a HUD restart must not re-trigger reminders.
-            let fresh = now - at < 60_000;
-            match event.event.as_str() {
-                "SessionStart" => {
-                    task.dismissed = false;
-                    if task.terminal.is_empty() {
-                        task.observed_activity = true;
-                    }
-                }
-                "UserPromptSubmit" => turn_started(task, at),
-                "Notification" => {
-                    if matches!(event.kind.as_str(), "permission" | "elicitation" | "input") && fresh {
-                        task.waiting_since = at;
-                        if settings.attention.on_waiting {
-                            set_attention(task, "waiting", now, &settings, &mut self.attention_seq);
-                        }
-                    }
-                }
-                "Stop" => {
-                    task.waiting_since = MIN;
-                    if fresh {
-                        begin_completion(task, String::new(), at, now, &settings, &mut self.attention_seq);
-                    } else {
-                        task.turn_open = false;
-                        task.terminal = "completed";
-                        task.terminal_at = at;
-                    }
-                }
-                "StopFailure" => {
-                    task.waiting_since = MIN;
-                    task.turn_open = false;
-                    task.clear_pending();
-                    task.terminal = "aborted";
-                    task.terminal_at = at;
-                    task.reset_exit();
-                    if fresh {
-                        set_attention(task, "aborted", now, &settings, &mut self.attention_seq);
-                    }
-                }
-                "SessionEnd" => {
-                    task.waiting_since = MIN;
-                    task.turn_open = false;
-                    task.clear_pending();
-                    if task.terminal.is_empty() {
-                        // Ended without a visible completion: leave quietly.
-                        task.terminal = "completed";
-                        task.terminal_at = at - (settings.terminal_hold_seconds * 1000.0) as i64;
-                    }
-                }
-                _ => {}
-            }
-            changed = true;
-        }
-        if changed {
-            self.revision += 1;
         }
         changed
     }
@@ -1254,15 +979,12 @@ impl Engine {
                 }
             }
             task.speed.refresh(now);
-            if let Some(state)=task.claude.as_mut() { state.speed.refresh(now); }
             task.last_rendered_status = next;
             changed |= update_exit(task, now, &settings, hold);
         }
         let _ = paused;
-        // Feed the day ledger from settled task totals (hydrating Claude
-        // transcripts would otherwise look like a burst of fresh activity).
         for task in self.tasks.values() {
-            if task.internal || task.hydrating {
+            if task.internal {
                 continue;
             }
             if let Some(snapshot) = &task.snapshot {
@@ -1410,7 +1132,7 @@ impl Engine {
                     status: self.status(t, now),
                     snapshot: t.snapshot.as_ref().map(|s| {
                         let mut s=s.clone();
-                        let speed=t.claude.as_ref().map(|state|&state.speed).unwrap_or(&t.speed).reading(self.status(t,now));
+                        let speed=t.speed.reading(self.status(t,now));
                         s.average_tps=speed.value;s.average_tps_samples=speed.samples;
                         s.average_tps_at=speed.at;s.average_tps_basis=speed.basis;
                         s
@@ -1440,7 +1162,7 @@ impl Engine {
             initial_scan_complete: self.initial_scan_complete,
             paused: self.paused,
             ledger: self.ledger.view(now),
-            account: self.account_view(now),
+            account: self.account_view(),
         }
     }
 
@@ -1461,11 +1183,6 @@ impl Engine {
         display.weekly_remaining = weekly;
         display.five_hour_remaining = five;
         display.allowance_at = at;
-        // Claude's plan usage is account-level too, from the desktop app's samples.
-        let (claude_five, claude_week, claude_at) = self.claude_quota.remaining(time::now_ms());
-        display.claude_five_hour_remaining = claude_five;
-        display.claude_weekly_remaining = claude_week;
-        display.claude_quota_at = claude_at;
         if let Some((balance, at)) = &self.dsh_balance {
             display.dsh_balance = Some(dsh_balance::format(balance));
             display.dsh_balance_value = Some(balance.total);
@@ -1516,7 +1233,7 @@ impl Engine {
     pub fn busiest_status(&self, now: i64) -> &'static str {
         let keys = self.visible_keys(now);
         let statuses: Vec<&str> = keys.iter().map(|k| self.status(&self.tasks[k], now)).collect();
-        if self.has_backlog() || self.title_backlog() || self.tasks.values().any(|t| t.hydrating) {
+        if self.has_backlog() || self.title_backlog() {
             "busy"
         } else if statuses.iter().any(|s| matches!(*s, "active" | "listening" | "waiting")) || self.tasks.values().any(|t| t.pending_due != MIN) {
             "active"
@@ -1592,7 +1309,7 @@ mod account_tests {
         let paths = HudPaths {
             plugin_root: root.clone(), state_root: root.join("state"), config_path: root.join("settings.json"),
             home: root.clone(), codex_home: root.join("codex"), deepseek_home: root.join("deepseek"),
-            claude_root: root.join("claude"), dsh_root: root.join("dsh"),
+            dsh_root: root.join("dsh"),
         };
         let now = time::now_ms();
         let mut engine = Engine::new(paths.clone(), Settings::from(&crate::config::defaults()));
@@ -1621,7 +1338,7 @@ mod account_tests {
         let paths = HudPaths {
             plugin_root: root.clone(), state_root: root.join("state"), config_path: root.join("settings.json"),
             home: root.clone(), codex_home: root.join("codex"), deepseek_home: root.join("deepseek"),
-            claude_root: root.join("claude"), dsh_root: root.join("dsh"),
+            dsh_root: root.join("dsh"),
         };
         let mut settings = Settings::from(&crate::config::defaults());
         settings.context_alerts_enabled = true;
@@ -1656,15 +1373,14 @@ mod account_tests {
         let mut deepseek = task();
         deepseek.profile = codex::DEEPSEEK_PROFILE;
         deepseek.five_hour = Some((1.0, 9000));
-        let mut claude = task();
-        claude.profile = codex::DEFAULT_PROFILE;
-        claude.source = Source::Claude;
-        claude.five_hour = Some((1.0, 9000));
+        let mut harness = task();
+        harness.source = Source::Dsh;
+        harness.five_hour = Some((1.0, 9000));
         let mut custom = task();
         custom.profile = codex::DEFAULT_PROFILE;
         custom.provider = "deepseek".into();
         custom.five_hour = Some((1.0, 9000));
-        let tasks = [&older, &newer, &deepseek, &claude, &custom];
+        let tasks = [&older, &newer, &deepseek, &harness, &custom];
         assert_eq!(codex_allowance(tasks.into_iter(), None), (Some(60.0), Some(70.0), Some(2000)));
 
         let official = allowance::Official { at: 3000, five_hour: None, weekly: Some(55.0) };
@@ -1906,14 +1622,14 @@ fn status_of(task: &Task, paused: bool, now: i64, settings: &Settings) -> &'stat
     if task.runtime_activity_at != MIN && now - task.runtime_activity_at <= RUNTIME_FRESH_MS {
         return "active";
     }
-    let turn_active_ms = if task.source == Source::Codex { RUNTIME_FRESH_MS } else { CLAUDE_TURN_ACTIVE_MS };
+    let turn_active_ms = if task.source == Source::Codex { RUNTIME_FRESH_MS } else { DSH_TURN_ACTIVE_MS };
     if task.turn_open && now - task.activity_reference() <= turn_active_ms {
         return "active";
     }
     if task.last_read_error_at != MIN && (now - task.last_read_error_at) as f64 <= settings.error_hold_seconds * 1000.0 {
         return "error";
     }
-    if task.read_blocked || task.hydrating {
+    if task.read_blocked {
         return "listening";
     }
     let Some(snapshot) = &task.snapshot else { return "idle" };
@@ -1930,9 +1646,6 @@ fn status_of(task: &Task, paused: bool, now: i64, settings: &Settings) -> &'stat
 
 fn is_visible(task: &Task, now: i64, settings: &Settings, source_enabled: bool) -> bool {
     if !task.identity_found || task.internal || task.dismissed || !source_enabled {
-        return false;
-    }
-    if task.source == Source::Claude && task.hydrating && task.snapshot.is_none() {
         return false;
     }
     if !task.terminal.is_empty() && task.terminal_at != MIN {
@@ -1972,8 +1685,6 @@ pub fn aggregate(snapshots: &[&Snapshot], summary_model: &str) -> Snapshot {
         out.task_cached += s.task_cached;
         out.task_uncached += s.task_uncached;
         out.task_output += s.task_output;
-        out.task_cache_write_5m += s.task_cache_write_5m;
-        out.task_cache_write_1h += s.task_cache_write_1h;
         out.task_cache_write_30m += s.task_cache_write_30m;
         out.call_total += s.call_total;
         out.task_total += s.task_total;

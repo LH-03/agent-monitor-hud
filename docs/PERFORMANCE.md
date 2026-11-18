@@ -27,7 +27,7 @@ The complete 4.0.0 release payload is **about 98% smaller** than the recorded 3.
   working set about 83.1% lower, and the full payload about 97.9% smaller.
 
 The release keeps the complete native settings window, task list, independent bubbles, themes,
-Claude hooks and MCP mode. These results do not depend on replacing the interface with a minimal
+and MCP mode. These results do not depend on replacing the interface with a minimal
 demonstration window.
 
 ## 中文
@@ -37,5 +37,5 @@ demonstration window.
 体积约缩小 **98%**。其中核心 EXE 为 **2.38 MB**，ZIP 下载体积为 **1.49 MB**。
 
 内存和 CPU 来自 2026-10-24 至 25 日迁移期间的桌面实测记录；体积取自已发布的 v4.0.0
-安装包。内存表仅统计 HUD 常驻进程，不包含 MCP 辅助进程和 Codex、Claude 等上游应用。
+安装包。内存表仅统计 HUD 常驻进程，不包含 MCP 辅助进程和上游应用。
 私有内存与工作集分别列出，不相加；CPU 按单个逻辑核心计。实际占用会随任务数量、视图和动画变化。

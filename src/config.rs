@@ -116,9 +116,8 @@ pub fn is_argb(text: &str) -> bool {
 }
 
 pub fn normalize(r: &mut Value, extra_languages: &[String]) {
-    set_bool(r, false, &["accounts", "claudeLiveQuota"]);
     set_allowed(r, "summary", &["summary", "list", "split"], &["multiTask", "displayMode"]);
-    for source in ["desktop", "vscode", "defaultCli", "deepSeekCli", "claudeDesktop", "claudeCli", "deepseekHarness"] {
+    for source in ["desktop", "vscode", "defaultCli", "deepSeekCli", "deepseekHarness"] {
         set_bool(r, true, &["sessionSources", source]);
     }
     set_allowed(r, "rows", &["rows", "cards", "rail"], &["multiTask", "listStyle"]);
@@ -329,7 +328,6 @@ pub struct Settings {
     pub accent: String,
     pub border: String,
     pub pricing_path: String,
-    pub claude_live_quota: bool,
     pub fields: BTreeMap<String, bool>,
     pub main: MainBubble,
 }
@@ -360,8 +358,6 @@ pub struct Sources {
     pub vscode: bool,
     pub default_cli: bool,
     pub deepseek_cli: bool,
-    pub claude_desktop: bool,
-    pub claude_cli: bool,
     pub dsh: bool,
 }
 
@@ -454,8 +450,6 @@ impl Settings {
                 vscode: bool_or(d, &["sessionSources", "vscode"], true),
                 default_cli: bool_or(d, &["sessionSources", "defaultCli"], true),
                 deepseek_cli: bool_or(d, &["sessionSources", "deepSeekCli"], true),
-                claude_desktop: bool_or(d, &["sessionSources", "claudeDesktop"], true),
-                claude_cli: bool_or(d, &["sessionSources", "claudeCli"], true),
                 dsh: bool_or(d, &["sessionSources", "deepseekHarness"], true),
             },
             display_mode: s(&["multiTask", "displayMode"], "summary"),
@@ -552,7 +546,6 @@ impl Settings {
             accent: s(&["accent"], "#FF0A84FF"),
             border: s(&["border"], "#33FFFFFF"),
             pricing_path: s(&["pricing", "path"], ""),
-            claude_live_quota: bool_or(d, &["accounts", "claudeLiveQuota"], false),
             fields: d
                 .get("fields")
                 .and_then(Value::as_object)

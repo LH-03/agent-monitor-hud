@@ -25,13 +25,8 @@ const RESIZE_GRIP: &str = "M4,13 L13,4 M8,13 L13,8";
 pub const ICON_VSCODE: &str = include_str!("../../resources/icons/vscode.path");
 pub const ICON_DEEPSEEK: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M2.8,8.4 C4.1,5.7 5.55,10.4 7.05,7.65 C8.15,5.65 9.3,7.25 11.2,5.75";
 pub const ICON_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M7.15,9.15 L10.65,9.15";
-/// Official Claude flower shared by desktop identity and quota groups.
-pub const ICON_CLAUDE: &str = include_str!("../../resources/icons/claude.path");
-/// Official Clawd mascot for Claude Code CLI identity.
-pub const ICON_CLAUDE_CLI: &str = include_str!("../../resources/icons/clawd.path");
 /// Official DeepSeek whale shared by Harness identity and balance groups.
 pub const ICON_DSH: &str = include_str!("../../resources/icons/deepseek.path");
-pub const CLAUDE_COLOR: &str = "#FFD97757";
 pub const DSH_COLOR: &str = "#FF4D6BFE";
 pub const CODEX_DESKTOP_COLOR: &str = "#FFFFFFFF";
 pub const CODEX_CLI_COLOR: &str = "#FF0A84FF";
@@ -89,8 +84,6 @@ pub fn source_label(t: &TaskView, loc: &Locale) -> String {
     match t.client {
         "vscode" => loc.get("sourceVsCode").into(),
         "desktop" => loc.get("sourceDesktop").into(),
-        "claude-desktop" => loc.get("sourceClaudeDesktop").into(),
-        "claude-cli" | "claude-unknown" => loc.get("sourceClaudeCli").into(),
         "dsh-desktop" => loc.get("sourceDsh").into(),
         _ if t.client == "cli" || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => {
             if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE {
@@ -109,7 +102,6 @@ pub fn source_color(t: &TaskView, s: &Settings) -> String {
     match t.client {
         "vscode" => "#FF007ACC".into(),
         "desktop" => CODEX_DESKTOP_COLOR.into(),
-        "claude-desktop" | "claude-cli" | "claude-unknown" => CLAUDE_COLOR.into(),
         "dsh-desktop" => DSH_COLOR.into(),
         _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => CODEX_CLI_COLOR.into(),
         "cli" => CODEX_CLI_COLOR.into(),
@@ -121,8 +113,6 @@ pub fn source_geometry(t: &TaskView) -> &'static str {
     match t.client {
         "vscode" => ICON_VSCODE,
         "desktop" => ICON_CODEX,
-        "claude-desktop" => ICON_CLAUDE,
-        "claude-cli" | "claude-unknown" => ICON_CLAUDE_CLI,
         "dsh-desktop" => ICON_DSH,
         _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => ICON_DEEPSEEK,
         _ => ICON_CLI,
@@ -130,7 +120,7 @@ pub fn source_geometry(t: &TaskView) -> &'static str {
 }
 
 fn source_badge_background(t: &TaskView, s: &Settings, alpha: u8) -> Paint {
-    if matches!(t.client, "desktop" | "claude-cli" | "claude-unknown") {
+    if t.client == "desktop" {
         solid(DARK_SOURCE_BADGE, DARK_SOURCE_BADGE, Role::Decoration, s, t.status, false)
     } else {
         tint(s, &source_color(t, s), "#FF64748B", alpha)
@@ -328,7 +318,7 @@ fn average_tps_text(t: &TaskView, c: &Ctx) -> String {
 }
 fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
     let Some(s)=&t.snapshot else { return c.sloc.get("averageTpsUnavailable").into() };
-    let key=match s.average_tps_basis { "response-window"=>"averageTpsCodex", "api-request"=>"averageTpsClaude", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
+    let key=match s.average_tps_basis { "response-window"=>"averageTpsCodex", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
     let mut text=c.sloc.get(key).to_string();
     if s.average_tps_samples>0 {
         text.push_str(&format!(" · {}: {}",c.sloc.get("averageTpsSamples"),s.average_tps_samples));
@@ -602,7 +592,6 @@ fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec
     let s = c.s;
     let short5 = c.loc.get("quotaShortFiveHour").to_string();
     let short_week = c.loc.get("quotaShortWeek").to_string();
-    let claude_note = d.claude_quota_at.map(|at| c.sloc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(at))).unwrap_or_default();
     let balance_note = d.dsh_balance_at.map(|at| c.sloc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(at))).unwrap_or_default();
     vec![
         QuotaSource {
@@ -616,18 +605,6 @@ fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec
             ],
             balance: None,
             note: String::new(),
-        },
-        QuotaSource {
-            source: Source::Claude,
-            name: agent_short_name(Source::Claude),
-            icon: ICON_CLAUDE,
-            color: CLAUDE_COLOR,
-            windows: vec![
-                (short5, c.loc.get("fiveHourRemaining").to_string(), d.claude_five_hour_remaining, s.field("claudeFiveHourRemaining")),
-                (short_week, c.loc.get("weeklyRemaining").to_string(), d.claude_weekly_remaining, s.field("claudeWeeklyRemaining")),
-            ],
-            balance: None,
-            note: claude_note,
         },
         QuotaSource {
             source: Source::Dsh,
@@ -838,7 +815,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
     if let Some(badge) = waiting_badge(c, &view.tasks) {
         items.push(badge);
     }
-    const QUOTA_KEYS: [&str; 4] = ["weeklyRemaining", "fiveHourRemaining", "claudeFiveHourRemaining", "claudeWeeklyRemaining"];
+    const QUOTA_KEYS: [&str; 2] = ["weeklyRemaining", "fiveHourRemaining"];
     let metrics = format::summary_metrics(display, &s.fields, c.loc, &s.number_format);
     match s.main.lead.as_str() {
         "rhythm" => items.push(rhythm_item(c, m)),
@@ -884,7 +861,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
 }
 
 fn agent_counts(tasks: &[TaskView]) -> Vec<(&'static str, usize)> {
-    let mut groups: Vec<_> = [Source::Codex, Source::Claude, Source::Dsh].into_iter()
+    let mut groups: Vec<_> = [Source::Codex, Source::Dsh].into_iter()
         .map(|source| (agent_short_name(source), tasks.iter().filter(|t| t.source == source).count()))
         .filter(|(_, count)| *count > 0).collect();
     groups.sort_by(|a, b| b.1.cmp(&a.1));
@@ -892,7 +869,7 @@ fn agent_counts(tasks: &[TaskView]) -> Vec<(&'static str, usize)> {
 }
 
 fn agent_short_name(source: Source) -> &'static str {
-    match source { Source::Codex => "Codex", Source::Claude => "CC", Source::Dsh => "DSH" }
+    match source { Source::Codex => "Codex", Source::Dsh => "DSH" }
 }
 
 fn add_source_breakdown(mut metrics: Vec<format::Metric>, tasks: &[TaskView]) -> Vec<format::Metric> {
@@ -1259,7 +1236,6 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
     let accent = notice.recipe.as_ref().map(|r| r.color.clone()).unwrap_or_else(|| s.notices.color.clone());
     let family = s.theme.font_family.as_str();
     let badge = match notice.agent {
-        Source::Claude => c.loc.get("agentNotificationBadgeClaude"),
         Source::Dsh => c.loc.get("agentNotificationBadgeDsh"),
         Source::Codex => c.loc.get("agentNotificationBadge"),
     };
@@ -1369,8 +1345,8 @@ mod quota_tests {
         let settings = Settings::from(&doc);
         let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
         let mut tasks: Vec<_> = (1..=3).map(|i| crate::ui::preview::synthetic(i, 1000)).collect();
-        tasks[1].source = Source::Claude; tasks[2].source = Source::Dsh;
-        let mut snapshot = crate::model::Snapshot { five_hour_remaining: Some(75.0), weekly_remaining: Some(80.0), claude_five_hour_remaining: Some(22.0), claude_weekly_remaining: Some(52.0), dsh_balance: Some("¥23.50".into()), ..Default::default() };
+        tasks[2].source = Source::Dsh;
+        let mut snapshot = crate::model::Snapshot { five_hour_remaining: Some(75.0), weekly_remaining: Some(80.0), dsh_balance: Some("¥23.50".into()), ..Default::default() };
         fn text(el: &El) -> Vec<String> {
             assert!(!matches!(el.kind, Kind::Bar { .. }));
             let mut values = if let Kind::Text { text, .. } = &el.kind { vec![text.clone()] } else { Vec::new() };
@@ -1378,14 +1354,13 @@ mod quota_tests {
             values
         }
         let items = quota_items(&c, &snapshot, &tasks);
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 2);
         assert_eq!(text(&items[0]), ["75%", "/", "80%"]);
-        assert_eq!(text(&items[1]), ["22%", "/", "52%"]);
-        assert_eq!(text(&items[2]), ["¥23.50"]);
+        assert_eq!(text(&items[1]), ["¥23.50"]);
         snapshot.weekly_remaining = None;
         assert_eq!(text(&quota_items(&c, &snapshot, &tasks)[0]), ["5h", "75%"]);
         snapshot.five_hour_remaining = None;
-        assert_eq!(quota_items(&c, &snapshot, &tasks).len(), 2);
+        assert_eq!(quota_items(&c, &snapshot, &tasks).len(), 1);
         doc["mainBubble"]["quotaStyle"] = serde_json::json!("chips");
         let settings = Settings::from(&doc);
         let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
@@ -1393,7 +1368,6 @@ mod quota_tests {
         let chips = quota_items(&c, &snapshot, &tasks);
         assert_eq!(text(&chips[0]), ["Codex 5h", "11%"]);
         assert_eq!(text(&chips[1]), ["Codex 周", "80%"]);
-        assert_eq!(text(&chips[2]), ["CC 5h", "22%"]);
     }
 
     #[test]
@@ -1403,18 +1377,17 @@ mod quota_tests {
         let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
         let snapshot = crate::model::Snapshot::default();
         let mut tasks: Vec<_> = (1..=3).map(|i| crate::ui::preview::synthetic(i, 1000)).collect();
-        tasks[1].source = Source::Claude;
+        tasks[1].source = Source::Dsh;
         tasks[1].status = "idle";
         tasks[2].source = Source::Dsh;
         tasks[2].status = "completed";
         let visible = |tasks: &[TaskView]| quota_sources(&c, &snapshot, tasks).into_iter().map(|s| s.source).collect::<Vec<_>>();
         assert_eq!(visible(&tasks), vec![Source::Codex]);
         tasks[1].status = "waiting";
-        assert_eq!(visible(&tasks), vec![Source::Codex, Source::Claude]);
+        assert_eq!(visible(&tasks), vec![Source::Codex, Source::Dsh]);
         tasks[0].status = "completed";
+        tasks[1].status = "completed";
         tasks[2].status = "active";
-        assert_eq!(visible(&tasks), vec![Source::Claude, Source::Dsh]);
-        tasks[1].status = "idle";
         tasks[2].source = Source::Codex;
         tasks[2].provider = "deepseek".into();
         assert_eq!(visible(&tasks), vec![Source::Dsh]);

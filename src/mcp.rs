@@ -1,4 +1,4 @@
-//! `AgentMonitorHUD.exe mcp`: STDIO MCP server for Codex and Claude Code
+//! `AgentMonitorHUD.exe mcp`: STDIO MCP server for Codex
 //! (replaces `src/mcp-server.mjs`). Same tools and output schemas; notices are
 //! labelled by the calling agent. Reads only HUD-local state.
 
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const INSTRUCTIONS: &str = "Agent Monitor HUD is a local, closed-world HUD control server for Codex, Claude Code and DeepSeek Harness. Before a proactive notice, call monitor_hud_notification_capabilities and match task_number plus agent/client/workspace to the current task. When the user enables a capacity guard, call monitor_hud_quota_guard at natural checkpoints and before expensive work; a low result means write a recoverable handoff, not that the HUD can interrupt a running turn. Never include secrets, credentials, prompts, replies, or full logs. Notices require user opt-in and are limited to 160 plain-text characters. Control tools affect only the local HUD.";
+const INSTRUCTIONS: &str = "Agent Monitor HUD is a local, closed-world HUD control server for Codex and DeepSeek Harness. Before a proactive notice, call monitor_hud_notification_capabilities and match task_number plus agent/client/workspace to the current task. When the user enables a capacity guard, call monitor_hud_quota_guard at natural checkpoints and before expensive work; a low result means write a recoverable handoff, not that the HUD can interrupt a running turn. Never include secrets, credentials, prompts, replies, or full logs. Notices require user opt-in and are limited to 160 plain-text characters. Control tools affect only the local HUD.";
 
 struct Server {
     paths: HudPaths,
@@ -56,15 +56,13 @@ fn registry(paths: &HudPaths) -> Value {
                 .take(64)
                 .filter_map(|t| {
                     let number = t["task_number"].as_u64().filter(|n| *n >= 1)?;
+                    let agent = t["agent"].as_str()?;
+                    if !matches!(agent, "codex" | "dsh") { return None; }
                     Some(json!({
                         "task_number": number,
+                        "agent": agent,
                         "workspace": clean(&t["workspace"], 80),
                         "status": clean(&t["status"], 24),
-                        "agent": match t["agent"].as_str() {
-                            Some("claude") => "claude",
-                            Some("dsh") => "dsh",
-                            _ => "codex",
-                        },
                         "client": clean(&t["client"], 24),
                         "provider": clean(&t["provider"], 40),
                         "profile": clean(&t["profile"], 24),
@@ -134,7 +132,7 @@ fn task_schema() -> Value {
         "required": ["task_number", "workspace", "status", "agent", "client", "provider", "profile", "updated_at"],
         "properties": {
             "task_number": {"type": "integer", "minimum": 1}, "workspace": {"type": "string"}, "status": {"type": "string"},
-            "agent": {"type": "string", "enum": ["codex", "claude", "dsh"]}, "client": {"type": "string"}, "provider": {"type": "string"},
+            "agent": {"type": "string", "enum": ["codex", "dsh"]}, "client": {"type": "string"}, "provider": {"type": "string"},
             "profile": {"type": "string"}, "updated_at": {"type": "string"}
         }
     })
@@ -172,7 +170,7 @@ fn tools() -> Value {
         control("monitor_hud_disable_click_through", "Disable HUD click-through", "Emergency recovery: disable mouse click-through so the HUD can be clicked again.", true),
         {
             "name": "monitor_hud_status", "title": "Read Monitor HUD status",
-            "description": "Read privacy-safe HUD health, enabled monitoring sources, and active task routing metadata for Codex, Claude Code and DeepSeek Harness tasks. No credentials, prompts, replies, logs, or profile paths are returned.",
+            "description": "Read privacy-safe HUD health, enabled monitoring sources, and active task routing metadata for Codex and DeepSeek Harness tasks. No credentials, prompts, replies, logs, or profile paths are returned.",
             "inputSchema": empty,
             "outputSchema": {
                 "type": "object", "additionalProperties": false,
@@ -181,8 +179,8 @@ fn tools() -> Value {
                     "ok": {"type": "boolean"}, "hud_state": {"type": "string", "enum": ["running", "not_detected"]},
                     "heartbeat_fresh": {"type": "boolean"}, "heartbeat_age_seconds": {"anyOf": [{"type": "number", "minimum": 0}, {"type": "null"}]},
                     "monitoring_sources": {"type": "object", "additionalProperties": false,
-                        "required": ["desktop_openai", "vscode_openai", "default_cli", "deepseek_cli", "claude_desktop", "claude_cli", "deepseek_harness"],
-                        "properties": {"desktop_openai": {"type": "boolean"}, "vscode_openai": {"type": "boolean"}, "default_cli": {"type": "boolean"}, "deepseek_cli": {"type": "boolean"}, "claude_desktop": {"type": "boolean"}, "claude_cli": {"type": "boolean"}, "deepseek_harness": {"type": "boolean"}}},
+                        "required": ["desktop_openai", "vscode_openai", "default_cli", "deepseek_cli", "deepseek_harness"],
+                        "properties": {"desktop_openai": {"type": "boolean"}, "vscode_openai": {"type": "boolean"}, "default_cli": {"type": "boolean"}, "deepseek_cli": {"type": "boolean"}, "deepseek_harness": {"type": "boolean"}}},
                     "registry_version": {"type": "integer", "minimum": 0}, "registry_generated_at": {"type": "string"},
                     "active_task_count": {"type": "integer", "minimum": 0},
                     "active_tasks": {"type": "array", "maxItems": 64, "items": task_schema()},
@@ -194,7 +192,7 @@ fn tools() -> Value {
         },
         {
             "name": "monitor_hud_quota_guard", "title": "Read Codex allowance handoff guard",
-            "description": "Read privacy-safe locally observed 5-hour and weekly Codex allowance plus a conservative handoff advisory. Call at natural checkpoints and before expensive work when the user wants capacity protection. This tool cannot interrupt a running turn; if it returns prepare_handoff or handoff_now, create a recoverable handoff before expanding work. Claude Code allowance is not observable locally.",
+            "description": "Read privacy-safe locally observed 5-hour and weekly Codex allowance plus a conservative handoff advisory. Call at natural checkpoints and before expensive work when the user wants capacity protection. This tool cannot interrupt a running turn; if it returns prepare_handoff or handoff_now, create a recoverable handoff before expanding work.",
             "inputSchema": empty, "outputSchema": quota_out,
             "annotations": {"title": "Read Codex allowance handoff guard", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
             "execution": {"taskSupport": "forbidden"}
@@ -221,7 +219,7 @@ fn tools() -> Value {
         },
         {
             "name": "monitor_hud_notify", "title": "Send a targeted HUD notice",
-            "description": "Opt-in: show a short notice card on the HUD for one matching task, labelled CODEX NOTICE or CLAUDE NOTICE by the calling agent. Check capabilities first and match task_number by agent, client and workspace. Expressive permission allows a bounded animation recipe.",
+            "description": "Opt-in: show a short notice card on the HUD for one matching task, labelled CODEX NOTICE or DEEPSEEK NOTICE by the calling agent. Check capabilities first and match task_number by agent, client and workspace. Expressive permission allows a bounded animation recipe.",
             "inputSchema": {
                 "type": "object", "required": ["message"], "additionalProperties": false,
                 "properties": {
@@ -266,8 +264,6 @@ impl Server {
                 "vscode_openai": s["sessionSources"]["vscode"].as_bool() != Some(false),
                 "default_cli": s["sessionSources"]["defaultCli"].as_bool() != Some(false),
                 "deepseek_cli": s["sessionSources"]["deepSeekCli"].as_bool() != Some(false),
-                "claude_desktop": s["sessionSources"]["claudeDesktop"].as_bool() != Some(false),
-                "claude_cli": s["sessionSources"]["claudeCli"].as_bool() != Some(false),
                 "deepseek_harness": s["sessionSources"]["deepseekHarness"].as_bool() != Some(false),
             },
             "registry_version": reg["version"],
@@ -284,7 +280,7 @@ impl Server {
         json!({
             "enabled": permission != "off",
             "permission": permission,
-            "identity": "Every notice is visibly labelled CODEX, CLAUDE or DEEPSEEK according to the calling agent.",
+            "identity": "Every notice is visibly labelled CODEX or DEEPSEEK according to the calling agent.",
             "targeting": "Match the current task to active_tasks by agent, workspace, client and profile, then pass task_number. If ambiguous, ask the user. Do not rely on another conversation's memory.",
             "limits": {"plain_text_characters": 160, "animation_layers": 4, "no_links_or_rich_text": true, "no_executable_code": true},
             "active_tasks": reg["tasks"],
@@ -344,7 +340,6 @@ impl Server {
             "version": 2,
             "created_at": time::utc_iso(time::now_ms()),
             "source": match self.agent {
-                crate::engine::Source::Claude => "claude-mcp",
                 crate::engine::Source::Dsh => "dsh-mcp",
                 crate::engine::Source::Codex => "codex-mcp",
             },
@@ -403,9 +398,7 @@ impl Server {
         match method {
             "initialize" => {
                 let client = params["clientInfo"]["name"].as_str().unwrap_or("").to_ascii_lowercase();
-                self.agent = if client.contains("claude") {
-                    crate::engine::Source::Claude
-                } else if client.contains("deepseek") || client.contains("dsh") || client.contains("harness") {
+                self.agent = if client.contains("deepseek") || client.contains("dsh") || client.contains("harness") {
                     crate::engine::Source::Dsh
                 } else {
                     crate::engine::Source::Codex
@@ -417,7 +410,7 @@ impl Server {
                     "protocolVersion": protocol,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "agent-monitor-hud", "title": "Agent Monitor HUD", "version": VERSION,
-                        "description": "Local real-time monitoring and opt-in task notices for Codex, Claude Code and DeepSeek Harness.",
+                        "description": "Local real-time monitoring and opt-in task notices for Codex and DeepSeek Harness.",
                         "websiteUrl": "https://github.com/LH-03/agent-monitor-hud"},
                     "instructions": INSTRUCTIONS,
                 }))

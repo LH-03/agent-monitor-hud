@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "product": "Agent Monitor HUD",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "repository": "https://github.com/LH-03/agent-monitor-hud",
-  "releaseTag": "v4.2.1",
+  "releaseTag": "v4.3.0",
   "checksumAsset": "SHA256SUMS.txt",
   "platforms": {
     "windows-x64": {
@@ -22,9 +22,7 @@
     "readSessionContent": false,
     "uploadLocalData": false,
     "handleUserApiKeys": true,
-    "readAgentLoginCredentials": true,
-    "requireOptInForLoginCredentials": true,
-    "persistAgentLoginCredentials": false
+    "readAgentLoginCredentials": false
   },
   "operations": {
     "install": "scripts/install.ps1",

@@ -7,7 +7,7 @@
 #   fresh install   ~/plugins/codex-monitor-hud is created
 #   from 3.x        the old plugin folder is kept whole as
 #                   ~/plugins/.codex-monitor-hud-rollback-<version>, together with
-#                   _native-install-backup (old shortcuts, Claude config copies);
+#                   _native-install-backup (old shortcuts);
 #                   scripts\rollback.ps1 restores it
 #   from 4.x        upgraded in place
 #
@@ -17,9 +17,7 @@ param(
     # Path to AgentMonitorHUD.exe; found automatically when omitted.
     [string]$Exe,
     # Do not start the HUD after installing.
-    [switch]$NoStart,
-    # Skip the Claude Code hooks / MCP registration even if Claude Code is present.
-    [switch]$NoClaude
+    [switch]$NoStart
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -131,13 +129,9 @@ if ($migration) {
     Move-Item $plugin $rollback
     $backup = Join-Path $rollback '_native-install-backup'
     $shortcuts = Join-Path $backup 'shortcuts'
-    $claude = Join-Path $backup 'claude'
-    New-Item -ItemType Directory -Force -Path $shortcuts, $claude | Out-Null
+    New-Item -ItemType Directory -Force -Path $shortcuts | Out-Null
     if (Test-Path $desktopLnk) { Copy-Item $desktopLnk (Join-Path $shortcuts 'desktop.lnk') }
     if (Test-Path $startLnk) { Copy-Item $startLnk (Join-Path $shortcuts 'startmenu.lnk') }
-    foreach ($f in @((Join-Path $HOME '.claude\settings.json'), (Join-Path $HOME '.claude.json'))) {
-        if (Test-Path $f) { Copy-Item $f (Join-Path $claude (Split-Path -Leaf $f)) }
-    }
     Copy-Item (Join-Path $PSScriptRoot 'rollback.ps1') (Join-Path $backup "rollback-to-$current.ps1")
     Write-Output "Previous $current kept at $rollback"
 }
@@ -178,16 +172,6 @@ foreach ($old in @($desktopLnk, $startLnk)) { Remove-Item $old -ErrorAction Sile
 if ((Test-Path $startFolder) -and -not (Get-ChildItem $startFolder -Force)) { Remove-Item $startFolder }
 Write-Shortcut $newDesktopLnk $exeInstalled
 Write-Shortcut $newStartLnk $exeInstalled
-
-# Claude Code: lifecycle hooks + MCP server (only the HUD's own entries), and
-# only when Claude Code is present on this machine.
-$hasClaude = (Test-Path (Join-Path $HOME '.claude')) -or (Test-Path (Join-Path $HOME '.claude.json'))
-if ($hasClaude -and -not $NoClaude) {
-    & $exeInstalled integrate claude | Out-Null
-    Write-Output "Claude Code integration: $(if ($LASTEXITCODE -eq 0) { 'ok' } else { 'FAILED (see %LOCALAPPDATA%\CodexMonitorHUD\hud.log)' })"
-} else {
-    Write-Output 'Claude Code integration: skipped'
-}
 
 if (-not $NoStart) {
     Remove-Item (Join-Path $env:LOCALAPPDATA 'CodexMonitorHUD\manual-exit.signal') -ErrorAction SilentlyContinue

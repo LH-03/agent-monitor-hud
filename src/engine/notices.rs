@@ -48,7 +48,6 @@ pub fn read_inbox(dir: &Path) -> Vec<Incoming> {
         let source = root.get("source").and_then(Value::as_str).unwrap_or("");
         let agent = match source {
             "codex-mcp" => super::Source::Codex,
-            "claude-mcp" => super::Source::Claude,
             "dsh-mcp" => super::Source::Dsh,
             _ => {
                 crate::util::fsx::remove_quietly(&path);

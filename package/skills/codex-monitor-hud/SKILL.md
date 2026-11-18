@@ -1,6 +1,6 @@
 ---
 name: codex-monitor-hud
-description: Operate, configure, explain, troubleshoot, or send opt-in task-targeted notices through the locally installed Agent Monitor HUD overlay (Codex, Claude Code and DeepSeek Harness tasks). Use when the user mentions HUD, Codex Monitor, "收尾保护", "额度保护", "额度快没了", or asks to preserve a recoverable handoff.
+description: Operate, configure, explain, troubleshoot, or send opt-in task-targeted notices through the locally installed Agent Monitor HUD overlay (Codex and DeepSeek Harness tasks). Use when the user mentions HUD, Codex Monitor, "收尾保护", "额度保护", "额度快没了", or asks to preserve a recoverable handoff.
 ---
 
 # Agent Monitor HUD
@@ -11,10 +11,10 @@ Use the plugin's MCP tools for normal operation:
 - `monitor_hud_show` shows or restarts the HUD.
 - `monitor_hud_hide` hides it without deleting settings.
 - `monitor_hud_pause` toggles live updates.
-- `monitor_hud_status` reports runtime health, configured source filters, and privacy-safe active task source metadata (including each task's `agent`: `codex`, `claude` or `dsh`).
+- `monitor_hud_status` reports runtime health, configured source filters, and privacy-safe active task source metadata (including each task's `agent`: `codex` or `dsh`).
 - `monitor_hud_quota_guard` reports the latest locally observed Codex 5-hour/weekly allowance and a conservative handoff advisory.
 - `monitor_hud_notification_capabilities` reports whether proactive notices are off, text-only, or allowed to use bounded live choreography. It also lists privacy-safe active HUD task numbers.
-- `monitor_hud_notify` sends one short notice, labeled with the calling agent (CODEX, CLAUDE or DEEPSEEK), to the matching task surface without ending or pausing the current turn.
+- `monitor_hud_notify` sends one short notice, labeled with the calling agent (CODEX or DEEPSEEK), to the matching task surface without ending or pausing the current turn.
 
 ## Proactive notice protocol
 
@@ -34,7 +34,7 @@ With `text` permission, send only the message and task number; the user's config
 
 ## Opt-in allowance handoff guard
 
-When the user says **“HUD 收尾保护”**, **“额度收尾保护”**, or equivalent natural language, immediately call `monitor_hud_quota_guard` once, then follow it at natural checkpoints and before a broad, expensive next step. It returns only the latest locally observed Codex account-level 5-hour/weekly percentages; Claude Code and DeepSeek Harness have no local allowance data, so unavailable data must stay unavailable rather than being guessed.
+When the user says **“HUD 收尾保护”**, **“额度收尾保护”**, or equivalent natural language, immediately call `monitor_hud_quota_guard` once, then follow it at natural checkpoints and before a broad, expensive next step. It returns only the latest locally observed Codex account-level 5-hour/weekly percentages; the guard only uses Codex allowance, so unavailable data must stay unavailable rather than being guessed.
 
 The user enables it and chooses the four editable thresholds in **Settings > Multi-task > Allowance handoff guard**. If the tool returns `disabled`, say that the protection is off and offer to open Settings; do not silently alter settings.
 
@@ -55,13 +55,12 @@ For creating a shareable skin, use `$create-monitor-hud-theme`. Finished `.json`
 - Cached input is a subset of input; fresh input is input minus cached input.
 - Call total is input plus output. Reasoning output is already inside output and is never added again.
 - Codex task totals come from `total_token_usage.total_tokens`.
-- Claude Code input is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`; cached is the cache-read part. Responses are de-duplicated by message id, and the context window is estimated from the model name (shown with ≈).
 - DeepSeek Harness totals and context pressure come from the harness's own token-usage projection.
-- Pricing treats ordinary input, cache reads and cache writes as disjoint buckets; writes are never charged again as ordinary input. Claude Fast rates apply only when reported by the response.
+- Pricing treats ordinary input, cache reads and cache writes as disjoint buckets; writes are never charged again as ordinary input.
 
 ## Privacy and safety
 
-Task monitoring reads metadata and token counts from Codex logs, Claude Code transcripts and DeepSeek Harness projections, without uploading logs, storing prompts or modifying sessions. Claude hooks report lifecycle events only. Live Claude allowance queries are off by default and require explicit opt-in (`accounts.claudeLiveQuota`): only then may the HUD read the selected Desktop account's encrypted login cache (or CLI fallback), decrypt its access token in memory and send it only to `api.anthropic.com/api/oauth/usage`. It never refreshes the token or writes authentication files. DeepSeek balance queries use the separately DPAPI-encrypted user-provided key only at `api.deepseek.com/user/balance`. Settings, the privacy-safe task-number registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
+Task monitoring reads metadata and token counts from Codex logs and DeepSeek Harness projections. DeepSeek balance queries use the separately DPAPI-encrypted user-provided key only at `api.deepseek.com/user/balance`. Settings, the task registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
 
 All sources share one bounded monitor and stable-number pool. Closing a detached bubble only merges that surface back into the main HUD; it does not dismiss the task from aggregate monitoring.
 

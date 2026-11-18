@@ -264,14 +264,25 @@ impl CostBook {
     pub fn observe(&mut self, key: &str, s: &Snapshot, catalog: &Catalog) -> Option<f64> {
         let tokens = Tokens::from(s);
         let prior = self.points.get(key);
-        if let Some(p) = prior.filter(|p| p.tokens == tokens) { return p.cost; }
+        let initial_cost = || {
+            if tokens.input == s.input && tokens.output == s.output {
+                catalog.call(&s.model, tokens, s.input, s.timestamp)
+            } else {
+                catalog.estimate(s)
+            }
+        };
+        // A newly added model can now price a checkpoint saved without a rate.
+        // Use the same estimate as a first sighting and preserve known costs.
+        let recovered = prior.filter(|p| p.cost.is_none()).and_then(|_| initial_cost());
+        if let Some(p) = prior.filter(|p| p.tokens == tokens && recovered.is_none()) { return p.cost; }
         // Old checkpoints priced Codex cache writes as ordinary input. Rebase
         // those once using the same documented short-context estimate as a
         // newly observed history, rather than charging those writes twice.
         let legacy_writes = prior.is_some_and(|p| p.version == 0) && tokens.write_30m > 0;
-        let cost = if legacy_writes && catalog.write_30m_changes_price(&s.model) {
-            if tokens.input == s.input && tokens.output == s.output { catalog.call(&s.model, tokens, s.input, s.timestamp) }
-            else { catalog.estimate(s) }
+        let cost = if recovered.is_some() {
+            recovered
+        } else if legacy_writes && catalog.write_30m_changes_price(&s.model) {
+            initial_cost()
         } else { match prior.and_then(|p| {
             let mut old = p.tokens;
             // When writes cost the same as fresh input, legacy checkpoints are
@@ -284,8 +295,7 @@ impl CostBook {
                 if !one_call && !catalog.unchanged_time_rate(&s.model, p.at, s.timestamp) { None }
                 else { p.cost.zip(catalog.call(&s.model, delta, s.input, s.timestamp)).map(|(a,b)| a+b) }
             },
-            None if tokens.input == s.input && tokens.output == s.output => catalog.call(&s.model, tokens, s.input, s.timestamp),
-            None => catalog.estimate(s),
+            None => initial_cost(),
         }};
         self.points.insert(key.to_owned(), Point { tokens, cost, at: s.timestamp, version: 1 });
         self.dirty = true;
@@ -401,6 +411,42 @@ mod tests {
             let reads = Tokens { input: 1_000_000, cached: 1_000_000, ..Default::default() };
             assert!((c.call(model,reads,1_000_000,1).unwrap() - 0.2).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn gpt_6_2_cache_prices_and_long_context_threshold() {
+        let catalog = Catalog::load("", std::path::Path::new("."));
+        let tokens = Tokens {
+            input: 100_000,
+            cached: 40_000,
+            write_30m: 30_000,
+            output: 10_000,
+            ..Default::default()
+        };
+        for (model, short, long) in [("gpt-6.2-astra", 0.956, 1.712), ("gpt-6.2-sol", 0.239, 0.428)] {
+            assert!((catalog.call(model, tokens, 272_000, 1).unwrap() - short).abs() < 1e-9, "{model}");
+            assert!((catalog.call(model, tokens, 272_001, 1).unwrap() - long).abs() < 1e-9, "{model}");
+        }
+    }
+
+    #[test]
+    fn newly_priced_model_recovers_an_unpriced_checkpoint() {
+        let catalog = Catalog::load("", std::path::Path::new("."));
+        let mut book = CostBook { points: HashMap::new(), path: PathBuf::new(), dirty: false, saved_at: 0 };
+        let mut snapshot = Snapshot {
+            model: "not-yet-priced".into(),
+            input: 100_000,
+            output: 10_000,
+            task_input: 100_000,
+            task_cached: 40_000,
+            task_cache_write_30m: 30_000,
+            task_output: 10_000,
+            ..Default::default()
+        };
+        assert_eq!(book.observe("session", &snapshot, &catalog), None);
+        snapshot.model = "gpt-6.2-sol".into();
+        assert!((book.observe("session", &snapshot, &catalog).unwrap() - 0.239).abs() < 1e-9);
+        assert!((book.observe("session", &snapshot, &catalog).unwrap() - 0.239).abs() < 1e-9);
     }
 
     #[test]

@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.1 - GPT-6.2 pricing
+
+- Add Standard API rates for GPT-6.2 Astra and Sol, including long-context
+  pricing and separate rates for fresh input, cache reads and cache writes.
+- Recover cost estimates for sessions saved before their model had a price.
+- Verify the response TPS calculation against GPT-6.2 Sol session metadata.
+
 ## 4.2.0 - Response timing, account refresh and cache-aware pricing
 
 - Fix inflated Codex TPS by timing each response from a turn/tool-return boundary

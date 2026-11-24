@@ -1,7 +1,7 @@
 {
     "name":  "codex-monitor-hud",
-    "version":  "4.3.0",
-    "description":  "A native local real-time multi-task HUD for Codex and DeepSeek Harness on Windows.",
+    "version":  "4.4.0",
+    "description":  "A native local real-time multi-task HUD for Codex, DeepSeek Harness and Google Antigravity on Windows.",
     "author":  {
                    "name":  "Agent Monitor HUD Contributors"
                },
@@ -9,6 +9,7 @@
     "keywords":  [
                      "codex",
                      "deepseek",
+                     "antigravity",
                      "token-usage",
                      "hud",
                      "windows",
@@ -21,8 +22,8 @@
     "mcpServers":  "./.mcp.json",
     "interface":  {
                       "displayName":  "Agent Monitor HUD",
-                      "shortDescription":  "Local live monitoring for concurrent Codex and DeepSeek Harness tasks.",
-                      "longDescription":  "A native, local-first real-time HUD for concurrent Codex Desktop, VS Code and CLI and DeepSeek Harness tasks on Windows. Distinct source badges separate every client. Keep one compact summary, expand a stable numbered task list, split selected tasks into independent bubbles, or opt in to source-labeled mid-task notices while the agent keeps working in the background.",
+                      "shortDescription":  "Local live monitoring for Codex, DeepSeek Harness and Google Antigravity tasks.",
+                      "longDescription":  "A native, local-first real-time HUD for Codex (Desktop, VS Code and CLI), DeepSeek Harness and Google Antigravity desktop tasks on Windows. Distinct source badges separate every client. Keep one compact summary, expand a stable numbered task list, split selected tasks into independent bubbles, or opt in to source-labeled mid-task notices while the agent keeps working in the background.",
                       "developerName":  "Agent Monitor HUD Contributors",
                       "category":  "Productivity",
                       "capabilities":  [

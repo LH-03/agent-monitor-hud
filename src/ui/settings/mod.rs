@@ -100,6 +100,7 @@ pub struct SettingsWindow {
     key_hint: Option<String>,
     balance_status: String,
     codex_quota: String,
+    antigravity_quota: String,
     sample: Option<preview::Sample>,
     sample_kind: u8,
     sample_open: bool,
@@ -213,6 +214,7 @@ pub fn open(app: &mut App) {
         key_hint: crate::secrets::deepseek_key_hint(&app.paths),
         balance_status: String::new(),
         codex_quota: String::new(),
+        antigravity_quota: String::new(),
         sample: None,
         sample_kind: 0,
         sample_open: false,
@@ -844,6 +846,11 @@ impl SettingsWindow {
             }
         };
         self.codex_quota = quota(a.codex_five_hour_remaining, a.codex_weekly_remaining, a.codex_at, "codexQuotaNone");
+        self.antigravity_quota = quota(
+            a.antigravity.and_then(|q| q.five_hour.map(|w| w.remaining)),
+            a.antigravity.and_then(|q| q.weekly.map(|w| w.remaining)),
+            a.antigravity.map(|q| q.at), "antigravityQuotaNone",
+        );
         self.balance_status = if self.key_hint.is_none() {
             loc.get("dshBalanceNoKey").to_string()
         } else if let Some(failure) = a.dsh_failure {
@@ -876,6 +883,7 @@ impl SettingsWindow {
             key_hint: self.key_hint.as_deref(),
             balance_status: &self.balance_status,
             codex_quota: &self.codex_quota,
+            antigravity_quota: &self.antigravity_quota,
             sample_kind: self.sample_kind,
             sample_open: self.sample_open,
         }
@@ -1903,6 +1911,7 @@ pub struct Look<'a> {
     pub key_hint: Option<&'a str>,
     pub balance_status: &'a str,
     pub codex_quota: &'a str,
+    pub antigravity_quota: &'a str,
     pub sample_kind: u8,
     pub sample_open: bool,
 }
@@ -2038,6 +2047,7 @@ pub fn build_tree(env: &Env, look: &Look) -> (El, pages::Builder) {
         key_hint: look.key_hint,
         balance_status: look.balance_status,
         codex_quota: look.codex_quota,
+        antigravity_quota: look.antigravity_quota,
     };
     let sidebar = pages::sidebar(&ui, &mut builder, look.status, look.status_tip);
     let header = pages::page_header(&ui, &mut builder);
@@ -2149,12 +2159,13 @@ pub fn render_preview(gfx: &Gfx, catalog: &Catalog, scene: &str, path: &std::pat
         preview: true,
         key_hint: None,
         balance_status: loc.get("dshBalanceNoKey"),
+        antigravity_quota: if language == "en" { "5h 95% · 7d 99%" } else { "5h 95% · 周 99%" },
         codex_quota: if language == "en" { "5h 61% · 7d 78% · updated 00:57" } else { "5h 61% · 周 78% · 更新于 00:57" },
         sample_kind: if tab == 3 { 1 } else if tab == 4 { 2 } else { 0 },
         sample_open: (1..=4).contains(&tab),
     };
     let (mut root, builder) = build_tree(&env, &look);
-    let size = (960.0, 760.0);
+    let size = (960.0, if tab == 5 { 900.0 } else { 760.0 });
     let ctx = layout::Ctx { gfx, scale: 1.0 };
     layout::measure(&mut root, size, &ctx);
     layout::arrange(&mut root, Rect { x: 0.0, y: 0.0, w: size.0, h: size.1 }, &ctx);

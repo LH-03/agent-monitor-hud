@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.4.0 - Google Antigravity desktop
+
+- Monitor local Antigravity 2 desktop conversations, including task status, context pressure, cached input, fresh input, output and sampled model throughput.
+- Show Gemini 5-hour and weekly quota from the running desktop app. The main bubble shows quota during active Antigravity tasks, and Settings shows the latest available reading.
+- Show workspace folder names and omit thinking-level suffixes from model names.
+
 ## 4.3.0 - Codex and DeepSeek Harness
 
 - Focus task monitoring, account readings and notifications on Codex and DeepSeek Harness.

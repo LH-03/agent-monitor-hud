@@ -2,9 +2,9 @@
 
 > [简体中文](README.zh-CN.md) · Windows x64 · formerly **Codex Monitor HUD**
 
-A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex** and
-**DeepSeek Harness** — with token usage, context, task state and what's left of
-your plan, using local metadata and optional official account queries.
+A small, always-on-top overlay that shows what your coding agents are doing right now — **Codex**,
+**DeepSeek Harness** and **Google Antigravity** — with token usage, context, task state and available
+account readings, using local metadata and optional official account queries.
 
 ![Main bubble with activity rhythm and quota groups](docs/images/hud-rhythm-dark.png)
 
@@ -36,6 +36,7 @@ Memory rows cover the HUD process, excluding MCP helpers and agent applications.
 | --- | --- | --- |
 | **Codex** | Desktop, VS Code, CLI, optional isolated DeepSeek CLI profile | 5-hour and weekly allowance |
 | **DeepSeek Harness** | Desktop | API balance (optional, needs your API key) |
+| **Google Antigravity** | Antigravity 2 desktop app, local conversations | Gemini 5-hour and weekly allowance |
 
 Every task carries a badge for its source.
 
@@ -102,7 +103,7 @@ desktop and Start menu, and registers the plugin for Codex.
 Or hand the repository URL to Codex and say **"install this for me"**; the agent
 procedure is in [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md).
 
-**Upgrading from 4.0–4.2**: Run the previous HUD version's uninstaller before installing 4.3 if you used its legacy third-party integration. The old uninstaller unregisters that integration and keeps HUD settings by default.
+**Upgrading from 4.0–4.2**: Run the previous HUD version's uninstaller before installing 4.3 or later if you used its legacy third-party integration. The old uninstaller unregisters that integration and keeps HUD settings by default.
 
 **Upgrading from 3.x** is automatic: your settings carry over, and the whole 3.x plugin folder is
 kept as `~/plugins/.codex-monitor-hud-rollback-<version>`. To go back:

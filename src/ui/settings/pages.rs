@@ -121,6 +121,7 @@ pub struct Ui<'a> {
     /// DeepSeek balance line ("¥23.50 · 00:57") or the last error.
     pub balance_status: &'a str,
     pub codex_quota: &'a str,
+    pub antigravity_quota: &'a str,
 }
 
 pub struct Builder {
@@ -765,6 +766,15 @@ fn agents(ui: &Ui, b: &mut Builder) -> El {
         ],
         ui.opt("dshApiKeyPrivacy"),
     );
+    let antigravity = group(
+        Some("Google Antigravity".into()),
+        vec![
+            source_row(ui, b, &["sessionSources", "antigravityDesktop"],
+                hud::ICON_ANTIGRAVITY, hud::ANTIGRAVITY_COLOR, true, "sourceAntigravityOption"),
+            row(ui.t("antigravityQuotaRow"), ui.opt("antigravityQuotaHint"), Some(text(ui.antigravity_quota, 12.5, 400, MUTED))),
+        ],
+        ui.opt("sourceAntigravityHint"),
+    );
     let privacy = group(ui.opt("grpPrivacy"), vec![block(wrap(ui.t("sessionSourcesPrivacy"), 12.0, MUTED).m(Th::new(0.0, 0.0, 0.0, 6.0)))], None);
-    El::vstack().child(codex).child(dsh).child(privacy)
+    El::vstack().child(codex).child(dsh).child(antigravity).child(privacy)
 }

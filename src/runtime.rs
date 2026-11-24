@@ -22,6 +22,7 @@ pub enum Command {
     HoldExits(bool),
     Pause(bool),
     Official(Option<allowance::Official>),
+    AntigravityQuota(Option<engine::antigravity_quota::Reading>),
     /// Opening settings requests fresh account readings, with a short throttle.
     RefreshAccounts,
     /// The stored DeepSeek key changed: re-read the balance now.
@@ -114,6 +115,10 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
     let mut balance_last = time::MIN;
     let mut balance_retry_after = time::MIN;
     let mut dsh_usage_seen = time::MIN;
+    let mut agy_running = false;
+    let mut agy_was_active = false;
+    let mut agy_next = time::now_ms() + 1_000;
+    let mut agy_last = time::MIN;
 
     let now = time::now_ms();
     engine.full_scan(now);
@@ -217,7 +222,17 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
                         official_next = now + 30_000;
                     }
                 }
+                Command::AntigravityQuota(reading) => {
+                    agy_running = false;
+                    if let Some(reading) = reading {
+                        engine.antigravity_quota = Some(reading);
+                        engine.revision += 1;
+                    } else {
+                        agy_next = agy_next.max(now + 30_000);
+                    }
+                }
                 Command::RefreshAccounts => {
+                    agy_next = agy_next.min(now.max(agy_last + 5_000));
                     official_next = official_next.min(now.max(official_last + 5_000));
                     balance_next = balance_next.min(now.max(balance_last + 5_000));
                 }
@@ -257,6 +272,23 @@ fn run(mut engine: Engine, catalog: Catalog, rx: Receiver<Command>, self_tx: Sen
             let _p = crate::util::prof::probe(crate::util::prof::VIEW);
             engine.view(now)
         };
+        let agy_active = view.tasks.iter().any(|t| {
+            t.source == engine::Source::Antigravity && matches!(t.status, "active" | "waiting" | "listening")
+        });
+        if agy_active && !agy_was_active {
+            agy_next = agy_next.min(now.max(agy_last + 5_000));
+        }
+        agy_was_active = agy_active;
+        if !agy_running && now >= agy_next && engine.settings.sources.antigravity {
+            agy_running = true;
+            agy_last = now;
+            agy_next = now + if agy_active { 15_000 } else { 120_000 };
+            let tx = self_tx.clone();
+            let home = paths.home.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(Command::AntigravityQuota(engine::antigravity_quota::read(&home)));
+            });
+        }
         let codex_enabled = engine.settings.sources.desktop || engine.settings.sources.vscode || engine.settings.sources.default_cli;
         let codex_active = view.tasks.iter().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(engine::Source::Codex) && matches!(t.status, "active" | "waiting" | "listening"));
         if codex_active { official_next = official_next.min(official_last + 30_000); }

@@ -27,6 +27,8 @@ pub const ICON_DEEPSEEK: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,
 pub const ICON_CLI: &str = "M1.4,2.1 L12.6,2.1 Q13,2.1 13,2.5 L13,11.5 Q13,11.9 12.6,11.9 L1.4,11.9 Q1,11.9 1,11.5 L1,2.5 Q1,2.1 1.4,2.1 Z M3,5.15 L5.85,7.15 L3,9.15 M7.15,9.15 L10.65,9.15";
 /// Official DeepSeek whale shared by Harness identity and balance groups.
 pub const ICON_DSH: &str = include_str!("../../resources/icons/deepseek.path");
+pub const ICON_ANTIGRAVITY: &str = include_str!("../../resources/icons/antigravity.path");
+pub const ANTIGRAVITY_COLOR: &str = "#FF7A9CFF";
 pub const DSH_COLOR: &str = "#FF4D6BFE";
 pub const CODEX_DESKTOP_COLOR: &str = "#FFFFFFFF";
 pub const CODEX_CLI_COLOR: &str = "#FF0A84FF";
@@ -85,6 +87,7 @@ pub fn source_label(t: &TaskView, loc: &Locale) -> String {
         "vscode" => loc.get("sourceVsCode").into(),
         "desktop" => loc.get("sourceDesktop").into(),
         "dsh-desktop" => loc.get("sourceDsh").into(),
+        "antigravity-desktop" => loc.get("sourceAntigravity").into(),
         _ if t.client == "cli" || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => {
             if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE {
                 loc.get("sourceCliDeepSeek").into()
@@ -103,6 +106,7 @@ pub fn source_color(t: &TaskView, s: &Settings) -> String {
         "vscode" => "#FF007ACC".into(),
         "desktop" => CODEX_DESKTOP_COLOR.into(),
         "dsh-desktop" => DSH_COLOR.into(),
+        "antigravity-desktop" => ANTIGRAVITY_COLOR.into(),
         _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => CODEX_CLI_COLOR.into(),
         "cli" => CODEX_CLI_COLOR.into(),
         _ => s.muted.clone(),
@@ -114,6 +118,7 @@ pub fn source_geometry(t: &TaskView) -> &'static str {
         "vscode" => ICON_VSCODE,
         "desktop" => ICON_CODEX,
         "dsh-desktop" => ICON_DSH,
+        "antigravity-desktop" => ICON_ANTIGRAVITY,
         _ if t.provider.eq_ignore_ascii_case("deepseek") || t.profile == crate::engine::codex::DEEPSEEK_PROFILE => ICON_DEEPSEEK,
         _ => ICON_CLI,
     }
@@ -318,7 +323,7 @@ fn average_tps_text(t: &TaskView, c: &Ctx) -> String {
 }
 fn average_tps_tooltip(t: &TaskView, c: &Ctx) -> String {
     let Some(s)=&t.snapshot else { return c.sloc.get("averageTpsUnavailable").into() };
-    let key=match s.average_tps_basis { "response-window"=>"averageTpsCodex", "decode"=>"averageTpsDsh", _=>"averageTpsUnavailable" };
+    let key=match s.average_tps_basis { "response-window"=>"averageTpsCodex", "decode"=>"averageTpsDsh", "antigravity-decode"=>"averageTpsAntigravity", _=>"averageTpsUnavailable" };
     let mut text=c.sloc.get(key).to_string();
     if s.average_tps_samples>0 {
         text.push_str(&format!(" · {}: {}",c.sloc.get("averageTpsSamples"),s.average_tps_samples));
@@ -588,12 +593,12 @@ struct QuotaSource {
     note: String,
 }
 
-fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec<QuotaSource> {
+fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, agy: Option<&crate::engine::antigravity_quota::Reading>, tasks: &[TaskView]) -> Vec<QuotaSource> {
     let s = c.s;
     let short5 = c.loc.get("quotaShortFiveHour").to_string();
     let short_week = c.loc.get("quotaShortWeek").to_string();
     let balance_note = d.dsh_balance_at.map(|at| c.sloc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(at))).unwrap_or_default();
-    vec![
+    let mut sources = vec![
         QuotaSource {
             source: Source::Codex,
             name: agent_short_name(Source::Codex),
@@ -615,19 +620,53 @@ fn quota_sources(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec
             balance: d.dsh_balance.clone().map(|b| (b, s.field("dshBalance"))).or_else(|| (!s.main.hide_empty && s.field("dshBalance")).then(|| ("--".to_string(), true))),
             note: balance_note,
         },
-    ].into_iter().filter(|source| tasks.iter().any(|t|
-        matches!(t.status, "active" | "waiting" | "listening")
-            && t.source.quota_source(&t.provider, t.profile) == Some(source.source))).collect()
+    ];
+    if let Some(q) = agy {
+        let updated = c.sloc.get("quotaUpdatedAt").replace("{0}", &time::local_hm(q.at));
+        let mut note = format!("Gemini · {updated}");
+        for (label, window) in [(&short5, q.five_hour), (&short_week, q.weekly)] {
+            if let Some(at) = window.and_then(|w| w.reset_at) {
+                let local = time::local_iso(at);
+                let when = local.get(5..16).unwrap_or(&local).replace('T', " ");
+                note.push_str(&format!(" · {label} {}", c.sloc.get("quotaResetsAt").replace("{0}", &when)));
+            }
+        }
+        sources.push(QuotaSource {
+            source: Source::Antigravity,
+            name: agent_short_name(Source::Antigravity),
+            icon: ICON_ANTIGRAVITY,
+            color: ANTIGRAVITY_COLOR,
+            windows: vec![
+                (short5, c.loc.get("fiveHourRemaining").into(), q.five_hour.map(|w| w.remaining), s.field("fiveHourRemaining")),
+                (short_week, c.loc.get("weeklyRemaining").into(), q.weekly.map(|w| w.remaining), s.field("weeklyRemaining")),
+            ],
+            balance: None,
+            note,
+        });
+    }
+    sources.retain(|source| tasks.iter().any(|t| {
+        if !matches!(t.status, "active" | "waiting" | "listening") {
+            return false;
+        }
+        if source.source == Source::Antigravity {
+            t.source == Source::Antigravity && t.snapshot.as_ref().is_none_or(|s| {
+                s.model.is_empty() || s.model.to_ascii_lowercase().starts_with("gemini")
+            })
+        } else {
+            t.source.quota_source(&t.provider, t.profile) == Some(source.source)
+        }
+    }));
+    sources
 }
 
 /// Quota items: per-agent meters, compact readings, or classic labelled chips.
-fn quota_items(c: &Ctx, d: &crate::model::Snapshot, tasks: &[TaskView]) -> Vec<El> {
+fn quota_items(c: &Ctx, d: &crate::model::Snapshot, agy: Option<&crate::engine::antigravity_quota::Reading>, tasks: &[TaskView]) -> Vec<El> {
     let s = c.s;
     let k = type_scale(s);
     let hide = s.main.hide_empty;
     let compact = s.main.quota_style == "compact";
     let mut items = Vec::new();
-    for source in quota_sources(c, d, tasks) {
+    for source in quota_sources(c, d, agy, tasks) {
         let windows: Vec<&(String, String, Option<f64>, bool)> = source.windows.iter().filter(|w| w.3 && (!hide || w.2.is_some())).collect();
         let balance = source.balance.as_ref().filter(|b| b.1);
         if windows.is_empty() && balance.is_none() {
@@ -808,6 +847,11 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
                 El::text(text, font(&s.theme.font_family, s.font_size, 600), solid(&s.foreground, "#FFFFFFFF", Role::Primary, s, "idle", false))
                     .va(Align::Center),
             );
+            if !view.paused && view.account.antigravity.is_some() {
+                for item in quota_items(c, &crate::model::Snapshot::default(), view.account.antigravity.as_ref(), &view.tasks) {
+                    wrap.push(item);
+                }
+            }
             return wrap;
         }
     };
@@ -837,7 +881,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
             items.push(status_item(c, &view.tasks));
         }
     }
-    items.extend(quota_items(c, display, &view.tasks));
+    items.extend(quota_items(c, display, view.account.antigravity.as_ref(), &view.tasks));
     let gap = SPREAD_GAP * m.spread.0;
     for (i, mut item) in items.into_iter().enumerate() {
         if s.layout != "inline" && i > 0 {
@@ -861,7 +905,7 @@ fn metrics_panel(c: &Ctx, m: &MainModel) -> El {
 }
 
 fn agent_counts(tasks: &[TaskView]) -> Vec<(&'static str, usize)> {
-    let mut groups: Vec<_> = [Source::Codex, Source::Dsh].into_iter()
+    let mut groups: Vec<_> = [Source::Codex, Source::Dsh, Source::Antigravity].into_iter()
         .map(|source| (agent_short_name(source), tasks.iter().filter(|t| t.source == source).count()))
         .filter(|(_, count)| *count > 0).collect();
     groups.sort_by(|a, b| b.1.cmp(&a.1));
@@ -869,7 +913,7 @@ fn agent_counts(tasks: &[TaskView]) -> Vec<(&'static str, usize)> {
 }
 
 fn agent_short_name(source: Source) -> &'static str {
-    match source { Source::Codex => "Codex", Source::Dsh => "DSH" }
+    match source { Source::Codex => "Codex", Source::Dsh => "DSH", Source::Antigravity => "AGY" }
 }
 
 fn add_source_breakdown(mut metrics: Vec<format::Metric>, tasks: &[TaskView]) -> Vec<format::Metric> {
@@ -1237,6 +1281,7 @@ pub fn build_notice(c: &Ctx, t: &TaskView) -> Option<El> {
     let family = s.theme.font_family.as_str();
     let badge = match notice.agent {
         Source::Dsh => c.loc.get("agentNotificationBadgeDsh"),
+        Source::Antigravity => c.loc.get("sourceAntigravity"),
         Source::Codex => c.loc.get("agentNotificationBadge"),
     };
     let header = El::grid(vec![Len::Auto, Len::Auto, Len::Star(1.0), Len::Auto], vec![])
@@ -1353,19 +1398,19 @@ mod quota_tests {
             for child in &el.children { values.extend(text(child)); }
             values
         }
-        let items = quota_items(&c, &snapshot, &tasks);
+        let items = quota_items(&c, &snapshot, None, &tasks);
         assert_eq!(items.len(), 2);
         assert_eq!(text(&items[0]), ["75%", "/", "80%"]);
         assert_eq!(text(&items[1]), ["¥23.50"]);
         snapshot.weekly_remaining = None;
-        assert_eq!(text(&quota_items(&c, &snapshot, &tasks)[0]), ["5h", "75%"]);
+        assert_eq!(text(&quota_items(&c, &snapshot, None, &tasks)[0]), ["5h", "75%"]);
         snapshot.five_hour_remaining = None;
-        assert_eq!(quota_items(&c, &snapshot, &tasks).len(), 1);
+        assert_eq!(quota_items(&c, &snapshot, None, &tasks).len(), 1);
         doc["mainBubble"]["quotaStyle"] = serde_json::json!("chips");
         let settings = Settings::from(&doc);
         let c = Ctx { s: &settings, loc: &catalog.zh, sloc: &catalog.zh, zh: &catalog.zh, en: &catalog.en, now: 1000, image_available: false };
         snapshot.five_hour_remaining = Some(11.0); snapshot.weekly_remaining = Some(80.0);
-        let chips = quota_items(&c, &snapshot, &tasks);
+        let chips = quota_items(&c, &snapshot, None, &tasks);
         assert_eq!(text(&chips[0]), ["Codex 5h", "11%"]);
         assert_eq!(text(&chips[1]), ["Codex 周", "80%"]);
     }
@@ -1381,7 +1426,7 @@ mod quota_tests {
         tasks[1].status = "idle";
         tasks[2].source = Source::Dsh;
         tasks[2].status = "completed";
-        let visible = |tasks: &[TaskView]| quota_sources(&c, &snapshot, tasks).into_iter().map(|s| s.source).collect::<Vec<_>>();
+        let visible = |tasks: &[TaskView]| quota_sources(&c, &snapshot, None, tasks).into_iter().map(|s| s.source).collect::<Vec<_>>();
         assert_eq!(visible(&tasks), vec![Source::Codex]);
         tasks[1].status = "waiting";
         assert_eq!(visible(&tasks), vec![Source::Codex, Source::Dsh]);

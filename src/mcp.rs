@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const INSTRUCTIONS: &str = "Agent Monitor HUD is a local, closed-world HUD control server for Codex and DeepSeek Harness. Before a proactive notice, call monitor_hud_notification_capabilities and match task_number plus agent/client/workspace to the current task. When the user enables a capacity guard, call monitor_hud_quota_guard at natural checkpoints and before expensive work; a low result means write a recoverable handoff, not that the HUD can interrupt a running turn. Never include secrets, credentials, prompts, replies, or full logs. Notices require user opt-in and are limited to 160 plain-text characters. Control tools affect only the local HUD.";
+const INSTRUCTIONS: &str = "Agent Monitor HUD is a local, closed-world HUD control server for Codex, DeepSeek Harness and Google Antigravity. Before a proactive notice, call monitor_hud_notification_capabilities and match task_number plus agent/client/workspace to the current task. When the user enables a capacity guard, call monitor_hud_quota_guard at natural checkpoints and before expensive work; a low result means write a recoverable handoff, not that the HUD can interrupt a running turn. Never include secrets, credentials, prompts, replies, or full logs. Notices require user opt-in and are limited to 160 plain-text characters. Control tools affect only the local HUD.";
 
 struct Server {
     paths: HudPaths,
@@ -57,7 +57,7 @@ fn registry(paths: &HudPaths) -> Value {
                 .filter_map(|t| {
                     let number = t["task_number"].as_u64().filter(|n| *n >= 1)?;
                     let agent = t["agent"].as_str()?;
-                    if !matches!(agent, "codex" | "dsh") { return None; }
+                    if !matches!(agent, "codex" | "dsh" | "antigravity") { return None; }
                     Some(json!({
                         "task_number": number,
                         "agent": agent,
@@ -132,7 +132,7 @@ fn task_schema() -> Value {
         "required": ["task_number", "workspace", "status", "agent", "client", "provider", "profile", "updated_at"],
         "properties": {
             "task_number": {"type": "integer", "minimum": 1}, "workspace": {"type": "string"}, "status": {"type": "string"},
-            "agent": {"type": "string", "enum": ["codex", "dsh"]}, "client": {"type": "string"}, "provider": {"type": "string"},
+            "agent": {"type": "string", "enum": ["codex", "dsh", "antigravity"]}, "client": {"type": "string"}, "provider": {"type": "string"},
             "profile": {"type": "string"}, "updated_at": {"type": "string"}
         }
     })
@@ -170,7 +170,7 @@ fn tools() -> Value {
         control("monitor_hud_disable_click_through", "Disable HUD click-through", "Emergency recovery: disable mouse click-through so the HUD can be clicked again.", true),
         {
             "name": "monitor_hud_status", "title": "Read Monitor HUD status",
-            "description": "Read privacy-safe HUD health, enabled monitoring sources, and active task routing metadata for Codex and DeepSeek Harness tasks. No credentials, prompts, replies, logs, or profile paths are returned.",
+            "description": "Read privacy-safe HUD health, enabled monitoring sources, and active task routing metadata for Codex, DeepSeek Harness and Google Antigravity tasks. No credentials, prompts, replies, logs, or profile paths are returned.",
             "inputSchema": empty,
             "outputSchema": {
                 "type": "object", "additionalProperties": false,
@@ -265,6 +265,7 @@ impl Server {
                 "default_cli": s["sessionSources"]["defaultCli"].as_bool() != Some(false),
                 "deepseek_cli": s["sessionSources"]["deepSeekCli"].as_bool() != Some(false),
                 "deepseek_harness": s["sessionSources"]["deepseekHarness"].as_bool() != Some(false),
+                "antigravity_desktop": s["sessionSources"]["antigravityDesktop"].as_bool() != Some(false),
             },
             "registry_version": reg["version"],
             "registry_generated_at": reg["generated_at"],
@@ -342,6 +343,7 @@ impl Server {
             "source": match self.agent {
                 crate::engine::Source::Dsh => "dsh-mcp",
                 crate::engine::Source::Codex => "codex-mcp",
+                crate::engine::Source::Antigravity => "antigravity-mcp",
             },
             "message": message,
             "task_number": number,
@@ -398,7 +400,9 @@ impl Server {
         match method {
             "initialize" => {
                 let client = params["clientInfo"]["name"].as_str().unwrap_or("").to_ascii_lowercase();
-                self.agent = if client.contains("deepseek") || client.contains("dsh") || client.contains("harness") {
+                self.agent = if client.contains("antigravity") {
+                    crate::engine::Source::Antigravity
+                } else if client.contains("deepseek") || client.contains("dsh") || client.contains("harness") {
                     crate::engine::Source::Dsh
                 } else {
                     crate::engine::Source::Codex
@@ -410,7 +414,7 @@ impl Server {
                     "protocolVersion": protocol,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "agent-monitor-hud", "title": "Agent Monitor HUD", "version": VERSION,
-                        "description": "Local real-time monitoring and opt-in task notices for Codex and DeepSeek Harness.",
+                        "description": "Local real-time monitoring and opt-in task notices for Codex, DeepSeek Harness and Google Antigravity.",
                         "websiteUrl": "https://github.com/LH-03/agent-monitor-hud"},
                     "instructions": INSTRUCTIONS,
                 }))

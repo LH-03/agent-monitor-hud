@@ -49,6 +49,7 @@ pub fn read_inbox(dir: &Path) -> Vec<Incoming> {
         let agent = match source {
             "codex-mcp" => super::Source::Codex,
             "dsh-mcp" => super::Source::Dsh,
+            "antigravity-mcp" => super::Source::Antigravity,
             _ => {
                 crate::util::fsx::remove_quietly(&path);
                 continue;

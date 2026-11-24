@@ -2,8 +2,8 @@
 
 > [English](README.md) · Windows x64 · 原名 **Codex Monitor HUD**
 
-一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex** 和
-**DeepSeek Harness**——包括 Token 用量、上下文、任务状态，以及套餐还剩多少，使用本地元数据和可选的官方账户查询。
+一个常驻桌面最上层的小浮窗，实时显示你的编程 Agent 正在做什么——**Codex**、
+**DeepSeek Harness** 和 **Google Antigravity**。通过本地元数据和可选的官方账户查询，显示 Token 用量、上下文、任务状态及可用的账户读数。
 
 ![主气泡：活动节奏 + 额度分组](docs/images/hud-rhythm-dark.png)
 
@@ -35,6 +35,7 @@ HUD、设置窗口和 MCP 服务共用同一个原生程序，不再打包 .NET 
 | --- | --- | --- |
 | **Codex** | 桌面端、VS Code、CLI、可选的独立 DeepSeek CLI Profile | 5 小时与周额度 |
 | **DeepSeek Harness** | 桌面版 | API 余额（可选，需要你自己的 API Key） |
+| **Google Antigravity** | Antigravity 2 桌面端的本地对话 | Gemini 5 小时与周额度 |
 
 每个任务前都有来源角标。
 
@@ -98,7 +99,7 @@ HUD、设置窗口和 MCP 服务共用同一个原生程序，不再打包 .NET 
 也可以把仓库地址交给 Codex，说一句**“帮我安装”**；Agent 的安装流程见
 [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md)。
 
-**从 4.0–4.2 升级**：用过旧版第三方集成的用户，先运行旧版 HUD 的卸载脚本，再安装 4.3。旧卸载脚本会注销该集成，默认保留 HUD 设置。
+**从 4.0–4.2 升级**：用过旧版第三方集成的用户，先运行旧版 HUD 的卸载脚本，再安装 4.3 或更新版本。旧卸载脚本会注销该集成，默认保留 HUD 设置。
 
 **从 3.x 升级**是自动的：设置会保留，整个 3.x 插件目录会完整保存为
 `~/plugins/.codex-monitor-hud-rollback-<版本>`。想回退：

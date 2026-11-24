@@ -117,7 +117,7 @@ pub fn is_argb(text: &str) -> bool {
 
 pub fn normalize(r: &mut Value, extra_languages: &[String]) {
     set_allowed(r, "summary", &["summary", "list", "split"], &["multiTask", "displayMode"]);
-    for source in ["desktop", "vscode", "defaultCli", "deepSeekCli", "deepseekHarness"] {
+    for source in ["desktop", "vscode", "defaultCli", "deepSeekCli", "deepseekHarness", "antigravityDesktop"] {
         set_bool(r, true, &["sessionSources", source]);
     }
     set_allowed(r, "rows", &["rows", "cards", "rail"], &["multiTask", "listStyle"]);
@@ -359,6 +359,7 @@ pub struct Sources {
     pub default_cli: bool,
     pub deepseek_cli: bool,
     pub dsh: bool,
+    pub antigravity: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -451,6 +452,7 @@ impl Settings {
                 default_cli: bool_or(d, &["sessionSources", "defaultCli"], true),
                 deepseek_cli: bool_or(d, &["sessionSources", "deepSeekCli"], true),
                 dsh: bool_or(d, &["sessionSources", "deepseekHarness"], true),
+                antigravity: bool_or(d, &["sessionSources", "antigravityDesktop"], true),
             },
             display_mode: s(&["multiTask", "displayMode"], "summary"),
             list_style: s(&["multiTask", "listStyle"], "rows"),

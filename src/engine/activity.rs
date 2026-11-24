@@ -20,6 +20,8 @@ type Busy = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
 type Prepare = unsafe extern "C" fn(*mut c_void, *const c_char, c_int, *mut *mut c_void, *mut *const c_char) -> c_int;
 type Step = unsafe extern "C" fn(*mut c_void) -> c_int;
 type ColText = unsafe extern "C" fn(*mut c_void, c_int) -> *const u8;
+type ColBlob = unsafe extern "C" fn(*mut c_void, c_int) -> *const u8;
+type ColBytes = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
 type ColInt64 = unsafe extern "C" fn(*mut c_void, c_int) -> i64;
 type Finalize = unsafe extern "C" fn(*mut c_void) -> c_int;
 type Close = unsafe extern "C" fn(*mut c_void) -> c_int;
@@ -31,6 +33,8 @@ struct Api {
     step: Step,
     text: ColText,
     int64: ColInt64,
+    blob: ColBlob,
+    bytes: ColBytes,
     finalize: Finalize,
     close: Close,
 }
@@ -51,6 +55,8 @@ fn api() -> Option<&'static Api> {
             step: sym!("sqlite3_step"),
             text: sym!("sqlite3_column_text"),
             int64: sym!("sqlite3_column_int64"),
+            blob: sym!("sqlite3_column_blob"),
+            bytes: sym!("sqlite3_column_bytes"),
             finalize: sym!("sqlite3_finalize"),
             close: sym!("sqlite3_close_v2"),
         })
@@ -63,55 +69,106 @@ const SQLITE_ROW: c_int = 100;
 const SQLITE_DONE: c_int = 101;
 const OPEN_READONLY: c_int = 0x1;
 
-pub fn recent_user_sessions(database: &Path, cutoff_ms: i64, limit: usize) -> Vec<Activity> {
-    let mut results = Vec::new();
-    if !database.exists() {
-        return results;
+pub(super) struct Database {
+    api: &'static Api,
+    handle: *mut c_void,
+}
+
+impl Database {
+    pub fn open(path: &Path) -> Option<Self> {
+        let api = api()?;
+        let path = CString::new(path.to_str()?).ok()?;
+        let mut db = Self { api, handle: std::ptr::null_mut() };
+        unsafe {
+            if (api.open)(path.as_ptr(), &mut db.handle, OPEN_READONLY, std::ptr::null()) != SQLITE_OK {
+                return None;
+            }
+            (api.busy)(db.handle, 50);
+        }
+        Some(db)
     }
-    let Some(api) = api() else { return results };
-    let Ok(path) = CString::new(database.to_string_lossy().as_bytes()) else { return results };
+
+    pub fn query<T>(&self, sql: &str, mut read: impl FnMut(&Row<'_>) -> T) -> Option<Vec<T>> {
+        let sql = CString::new(sql).ok()?;
+        let mut stmt = Statement { db: self, handle: std::ptr::null_mut() };
+        unsafe {
+            if (self.api.prepare)(self.handle, sql.as_ptr(), -1, &mut stmt.handle, std::ptr::null_mut()) != SQLITE_OK
+                || stmt.handle.is_null()
+            {
+                return None;
+            }
+            let mut rows = Vec::new();
+            loop {
+                match (self.api.step)(stmt.handle) {
+                    SQLITE_ROW => rows.push(read(&Row(&stmt))),
+                    SQLITE_DONE => return Some(rows),
+                    _ => return None,
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { (self.api.close)(self.handle) };
+        }
+    }
+}
+
+struct Statement<'a> {
+    db: &'a Database,
+    handle: *mut c_void,
+}
+
+impl Drop for Statement<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.db.api.finalize)(self.handle) };
+    }
+}
+
+pub(super) struct Row<'a>(&'a Statement<'a>);
+
+impl Row<'_> {
+    pub fn text(&self, col: c_int) -> String {
+        let ptr = unsafe { (self.0.db.api.text)(self.0.handle, col) };
+        if ptr.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(ptr.cast()) }.to_string_lossy().into_owned()
+        }
+    }
+
+    pub fn int(&self, col: c_int) -> i64 {
+        unsafe { (self.0.db.api.int64)(self.0.handle, col) }
+    }
+
+    // Give the slice only to the decoder. SQLite owns it until the next
+    // step/conversion, so no borrowed blob can escape this callback.
+    pub fn blob<T>(&self, col: c_int, decode: impl FnOnce(&[u8]) -> T) -> T {
+        let api = self.0.db.api;
+        let stmt = self.0.handle;
+        unsafe {
+            let ptr = (api.blob)(stmt, col);
+            let len = (api.bytes)(stmt, col);
+            decode(if ptr.is_null() || len <= 0 { &[] } else { std::slice::from_raw_parts(ptr, len as usize) })
+        }
+    }
+}
+
+pub fn recent_user_sessions(database: &Path, cutoff_ms: i64, limit: usize) -> Vec<Activity> {
+    let Some(db) = Database::open(database) else { return Vec::new() };
     let sql = format!(
         "SELECT id, rollout_path, updated_at_ms FROM threads WHERE archived = 0 AND thread_source = 'user' \
          AND updated_at_ms >= {cutoff_ms} ORDER BY updated_at_ms DESC LIMIT {}",
         limit.clamp(1, 256)
     );
-    let Ok(sql) = CString::new(sql) else { return results };
-    unsafe {
-        let mut db: *mut c_void = std::ptr::null_mut();
-        if (api.open)(path.as_ptr(), &mut db, OPEN_READONLY, std::ptr::null()) != SQLITE_OK || db.is_null() {
-            if !db.is_null() {
-                (api.close)(db);
-            }
-            return results;
-        }
-        (api.busy)(db, 75);
-        let mut stmt: *mut c_void = std::ptr::null_mut();
-        if (api.prepare)(db, sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut()) == SQLITE_OK && !stmt.is_null() {
-            loop {
-                let step = (api.step)(stmt);
-                if step == SQLITE_DONE {
-                    break;
-                }
-                if step != SQLITE_ROW {
-                    results.clear();
-                    break;
-                }
-                let read = |col: c_int| -> String {
-                    let ptr = (api.text)(stmt, col);
-                    if ptr.is_null() { String::new() } else { CStr::from_ptr(ptr as *const c_char).to_string_lossy().into_owned() }
-                };
-                let session_id = read(0);
-                let rollout_path = read(1);
-                let updated_ms = (api.int64)(stmt, 2);
-                if !session_id.is_empty() && !rollout_path.is_empty() && updated_ms > 0 {
-                    results.push(Activity { session_id, rollout_path, updated_ms });
-                }
-            }
-            (api.finalize)(stmt);
-        }
-        (api.close)(db);
-    }
-    results
+    db.query(&sql, |row| Activity { session_id: row.text(0), rollout_path: row.text(1), updated_ms: row.int(2) })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| !r.session_id.is_empty() && !r.rollout_path.is_empty() && r.updated_ms > 0)
+        .collect()
 }
 
 /// `\\?\C:\...` → `C:\...`, `\\?\UNC\server\share` → `\\server\share`.

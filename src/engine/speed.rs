@@ -120,6 +120,9 @@ impl Tracker {
             while self.samples.len()>5 { self.samples.pop_front(); }
         }
     }
+    pub fn antigravity_sample(&mut self, index: i64, tokens: i64, ms: i64, at: i64) {
+        self.add(&index.to_string(), tokens, ms, at, "antigravity-decode");
+    }
     pub fn dsh(&mut self, p: &super::dsh::Projection, at: i64) {
         self.model(&p.model);
         // Match the Harness session-statistics pill: its entire session's

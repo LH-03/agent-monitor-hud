@@ -1,6 +1,6 @@
 ---
 name: codex-monitor-hud
-description: Operate, configure, explain, troubleshoot, or send opt-in task-targeted notices through the locally installed Agent Monitor HUD overlay (Codex and DeepSeek Harness tasks). Use when the user mentions HUD, Codex Monitor, "收尾保护", "额度保护", "额度快没了", or asks to preserve a recoverable handoff.
+description: Operate, configure, explain, troubleshoot, or send opt-in task-targeted notices through the locally installed Agent Monitor HUD overlay (Codex, DeepSeek Harness and Google Antigravity tasks). Use when the user mentions HUD, Codex Monitor, "收尾保护", "额度保护", "额度快没了", or asks to preserve a recoverable handoff.
 ---
 
 # Agent Monitor HUD
@@ -11,7 +11,7 @@ Use the plugin's MCP tools for normal operation:
 - `monitor_hud_show` shows or restarts the HUD.
 - `monitor_hud_hide` hides it without deleting settings.
 - `monitor_hud_pause` toggles live updates.
-- `monitor_hud_status` reports runtime health, configured source filters, and privacy-safe active task source metadata (including each task's `agent`: `codex` or `dsh`).
+- `monitor_hud_status` reports runtime health, configured source filters, and privacy-safe active task source metadata (including each task's `agent`: `codex`, `dsh` or `antigravity`).
 - `monitor_hud_quota_guard` reports the latest locally observed Codex 5-hour/weekly allowance and a conservative handoff advisory.
 - `monitor_hud_notification_capabilities` reports whether proactive notices are off, text-only, or allowed to use bounded live choreography. It also lists privacy-safe active HUD task numbers.
 - `monitor_hud_notify` sends one short notice, labeled with the calling agent (CODEX or DEEPSEEK), to the matching task surface without ending or pausing the current turn.
@@ -56,11 +56,12 @@ For creating a shareable skin, use `$create-monitor-hud-theme`. Finished `.json`
 - Call total is input plus output. Reasoning output is already inside output and is never added again.
 - Codex task totals come from `total_token_usage.total_tokens`.
 - DeepSeek Harness totals and context pressure come from the harness's own token-usage projection.
+- Google Antigravity 2 desktop reads local conversation statistics, context and model response timing. Gemini 5-hour and weekly allowance comes from the running desktop app’s local quota service.
 - Pricing treats ordinary input, cache reads and cache writes as disjoint buckets; writes are never charged again as ordinary input.
 
 ## Privacy and safety
 
-Task monitoring reads metadata and token counts from Codex logs and DeepSeek Harness projections. DeepSeek balance queries use the separately DPAPI-encrypted user-provided key only at `api.deepseek.com/user/balance`. Settings, the task registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
+Task monitoring reads metadata and token counts from Codex logs, DeepSeek Harness projections and Google Antigravity desktop SQLite metadata. DeepSeek balance queries use the separately DPAPI-encrypted user-provided key only at `api.deepseek.com/user/balance`. Settings, the task registry and queued notices live under `%LOCALAPPDATA%\CodexMonitorHUD`.
 
 All sources share one bounded monitor and stable-number pool. Closing a detached bubble only merges that surface back into the main HUD; it does not dismiss the task from aggregate monitoring.
 

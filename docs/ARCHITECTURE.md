@@ -62,6 +62,22 @@ tight and a fully spread layout; type never scales and the bubble never reflows 
   `settings.json`, and sent only to `api.deepseek.com/user/balance` (about every 5 seconds active,
   every minute idle, with debounced reads after usage/turn changes and failure backoff).
 
+### Google Antigravity 2 desktop app
+
+- `~/.gemini/antigravity/conversation_summaries.db` and `conversations/<id>.db` are opened
+  read-only with Windows SQLite. The HUD reads task summaries and step/generation metadata
+  at the activity discovery cadence. It advances a response index only after a response
+  reaches a terminal state, so updates to in-flight records are picked up on a later poll.
+- Cached input, uncached input and output are separate counters. Context is estimated
+  tokens relative to the app's auto-compaction limit. Actual account charges are unavailable.
+- Gemini 5-hour and weekly allowance comes from the desktop app's local quota-summary RPC.
+  The HUD uses the running desktop daemon's loopback header without reading Google account
+  credentials. Reads occur about every 15 seconds during active tasks, every two minutes
+  while idle, and when Settings requests a fresh reading. Missing or expired readings
+  stay unavailable.
+- Local field mapping reference: [AGY Lens](https://github.com/xukp20/agy-lens).
+  Source badge artwork: [Google Antigravity press assets](https://antigravity.google/press).
+
 ## State
 
 Everything lives in `%LOCALAPPDATA%\CodexMonitorHUD` (the 3.x folder name is kept so settings carry

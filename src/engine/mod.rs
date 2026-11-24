@@ -1,9 +1,11 @@
 //! The single task table shared by every surface. It discovers Codex,
-//! DeepSeek Harness sessions, reads only appended data, advances the lifecycle and
+//! DeepSeek Harness and Google Antigravity sessions, advances the lifecycle and
 //! publishes immutable views to the UI thread.
 
 pub mod activity;
 pub mod allowance;
+pub(crate) mod antigravity;
+pub mod antigravity_quota;
 pub mod codex;
 pub mod dsh;
 pub mod dsh_balance;
@@ -35,6 +37,7 @@ pub enum Source {
     Codex,
     /// DeepSeek Harness desktop.
     Dsh,
+    Antigravity,
 }
 
 impl Source {
@@ -43,8 +46,8 @@ impl Source {
         match self {
             Source::Codex if profile == codex::DEEPSEEK_PROFILE || provider.eq_ignore_ascii_case("deepseek") => Some(Source::Dsh),
             Source::Codex if provider.is_empty() || provider.eq_ignore_ascii_case("openai") => Some(Source::Codex),
-            Source::Codex => None,
-            source => Some(source),
+            Source::Codex | Source::Antigravity => None,
+            Source::Dsh => Some(Source::Dsh),
         }
     }
 
@@ -53,6 +56,7 @@ impl Source {
         match self {
             Source::Codex => "codex",
             Source::Dsh => "dsh",
+            Source::Antigravity => "antigravity",
         }
     }
 }
@@ -128,6 +132,7 @@ pub struct Task {
     five_hour: Option<(f64, i64)>,
     reader: jsonl::IncrementalReader,
     dsh: Option<Box<dsh::Projection>>,
+    antigravity: Option<Box<antigravity::Reader>>,
 }
 
 impl Task {
@@ -180,6 +185,7 @@ impl Task {
             five_hour: None,
             reader: jsonl::IncrementalReader::default(),
             dsh: None,
+            antigravity: None,
         }
     }
 
@@ -266,6 +272,7 @@ pub struct AccountView {
     pub codex_five_hour_remaining: Option<f64>,
     pub codex_weekly_remaining: Option<f64>,
     pub codex_at: Option<i64>,
+    pub antigravity: Option<antigravity_quota::Reading>,
     pub dsh_balance: Option<String>,
     pub dsh_at: Option<i64>,
     /// "unauthorized", "network" or "unexpected" after a failed balance read.
@@ -323,6 +330,7 @@ pub struct Engine {
     pub pricing: pricing::Catalog,
     pub costs: pricing::CostBook,
     pub official_allowance: Option<allowance::Official>,
+    pub antigravity_quota: Option<antigravity_quota::Reading>,
     last_full_scan: i64,
     last_activity_query: i64,
 }
@@ -361,6 +369,7 @@ impl Engine {
             initial_scan_complete: false,
             pricing,
             official_allowance: None,
+            antigravity_quota: None,
             last_full_scan: MIN,
             last_activity_query: MIN,
         }
@@ -411,6 +420,7 @@ impl Engine {
         let s = &self.settings.sources;
         match task.source {
             Source::Dsh => s.dsh,
+            Source::Antigravity => s.antigravity,
             Source::Codex if task.profile == codex::DEEPSEEK_PROFILE => s.deepseek_cli,
             Source::Codex => match task.client {
                 "desktop" => s.desktop,
@@ -509,6 +519,7 @@ impl Engine {
                 }
             }
         }
+        changed |= self.scan_antigravity(now, cutoff);
         if changed {
             self.revision += 1;
         }
@@ -524,12 +535,13 @@ impl Engine {
         self.tasks.values().any(|t| t.source.quota_source(&t.provider, t.profile) == Some(Source::Dsh) && now - t.activity_reference() <= 2 * 60 * 1000)
     }
 
-    fn account_view(&self) -> AccountView {
+    fn account_view(&self, now: i64) -> AccountView {
         let (codex_five, codex_week, codex_at) = codex_allowance(self.tasks.values(), self.official_allowance.as_ref());
         AccountView {
             codex_five_hour_remaining: codex_five,
             codex_weekly_remaining: codex_week,
             codex_at,
+            antigravity: self.antigravity_quota.filter(|q| self.settings.sources.antigravity && now - q.at < 180_000),
             dsh_balance: self.dsh_balance.as_ref().map(|(b, _)| dsh_balance::format(b)),
             dsh_at: self.dsh_balance.as_ref().map(|(_, at)| *at),
             dsh_failure: self.dsh_balance_failure.as_ref().map(|f| match f {
@@ -541,7 +553,7 @@ impl Engine {
     }
 
     pub fn activity_query_due(&self, now: i64) -> bool {
-        let live = self.tasks.values().any(|t| t.source == Source::Codex && (t.turn_open || now - t.activity_reference() <= RUNTIME_FRESH_MS));
+        let live = self.tasks.values().any(|t| t.source != Source::Dsh && self.source_enabled(t) && (t.turn_open || now - t.activity_reference() <= RUNTIME_FRESH_MS));
         now - self.last_activity_query >= if live { 2000 } else { 5000 }
     }
 
@@ -645,6 +657,12 @@ impl Engine {
         match source {
             Source::Codex => self.init_codex(&mut task, now),
             Source::Dsh => self.init_dsh(&mut task, now),
+            Source::Antigravity => {
+                task.client = "antigravity-desktop";
+                task.provider = "google".into();
+                task.session_id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+                task.antigravity = Some(Box::default());
+            }
         }
         self.tasks.insert(key, task);
         true
@@ -807,6 +825,140 @@ impl Engine {
         true
     }
 
+    fn scan_antigravity(&mut self, now: i64, cutoff: i64) -> bool {
+        use antigravity::Phase;
+
+        if !self.settings.sources.antigravity {
+            return false;
+        }
+        let root = antigravity::root(&self.paths.home);
+        let summaries = antigravity::summaries(&root);
+        let mut candidates: HashMap<_, _> = antigravity::sessions(&root, cutoff).into_iter().collect();
+        for (id, summary) in &summaries {
+            if !summary.child && summary.at >= cutoff {
+                if let Some(path) = antigravity::session_path(&root, id) {
+                    if let Some(stamp) = fsx::stamp(&path) {
+                        candidates.entry(path).or_insert(stamp);
+                    }
+                }
+            }
+        }
+        for task in self.tasks.values().filter(|t| t.source == Source::Antigravity && t.turn_open) {
+            candidates.entry(task.path.clone()).or_insert(task.stamp);
+        }
+        let mut candidates: Vec<_> = candidates.into_iter().collect();
+        candidates.sort_unstable_by_key(|(_, stamp)| std::cmp::Reverse(stamp.write_ms));
+        let mut changed = false;
+        for (path, stamp) in candidates.into_iter().take(MAX_TASKS) {
+            let key = path_key(&path);
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let summary = summaries.get(&id.to_ascii_lowercase());
+            if summary.is_some_and(|s| s.child) {
+                if let Some(task) = self.tasks.get_mut(&key) {
+                    changed |= !task.internal;
+                    task.internal = true;
+                }
+                continue;
+            }
+            self.ensure_task(&path, stamp, Source::Antigravity, "antigravity", now);
+            let Some(task) = self.tasks.get_mut(&key) else { continue };
+            let Some(agy) = &mut task.antigravity else { continue };
+            // Idle rows with a stable summary and fully consumed telemetry
+            // need no per-session SQLite queries on every discovery tick.
+            if task.identity_found && !task.internal && !task.turn_open && agy.caught_up && task.stamp == stamp
+                && summary.is_some_and(|s| s.at <= agy.at && s.phase == Some(agy.phase) && s.title == task.title)
+            {
+                continue;
+            }
+            let previous = (agy.phase, agy.input, agy.at, agy.generating);
+            if agy.read(&path, summary, now, &mut task.speed).is_none() {
+                // A removed database or an abandoned writer must not pin a
+                // previously open task, especially one awaiting confirmation.
+                if task.turn_open && (matches!(path.try_exists(), Ok(false)) || now - agy.at > OPEN_TURN_RETENTION_MS) {
+                    agy.phase = Phase::Idle;
+                    agy.generating = false;
+                    task.turn_open = false;
+                    task.waiting_since = MIN;
+                    task.dismissed = true;
+                    changed = true;
+                }
+                continue;
+            }
+            if agy.input < 0 {
+                // New databases may exist before their first user turn.
+                continue;
+            }
+            let initial = !task.identity_found || task.internal;
+            task.identity_found = true;
+            task.internal = false;
+            let phase = agy.phase;
+            let settled = agy.settled;
+            let at = agy.at;
+            let new_input = agy.input > previous.1;
+            let state_changed = previous != (phase, agy.input, at, agy.generating);
+            task.speed.tool("antigravity-outside-model", !agy.generating);
+            task.speed.refresh(now);
+            let title_changed = summary.is_some_and(|s| task.title != s.title);
+            if let Some(s) = summary {
+                task.title.clone_from(&s.title);
+            }
+            let identity_changed = task.model != agy.model || task.workspace != agy.workspace;
+            task.model.clone_from(&agy.model);
+            task.workspace.clone_from(&agy.workspace);
+            task.stamp = stamp;
+            task.started_at = if agy.created() > 0 { agy.created() } else { task.started_at };
+            task.last_activity_at = at;
+            let snapshot = agy.snapshot();
+            let usage_changed = task.snapshot != snapshot;
+            if usage_changed {
+                if let Some(s) = &snapshot {
+                    if task.last_usage_at != s.timestamp {
+                        self.last_usage_at = self.last_usage_at.max(s.timestamp);
+                        task.last_usage_at = s.timestamp;
+                    }
+                }
+                task.snapshot = snapshot;
+                if !initial {
+                    update_context_alert(task, now, &self.settings, &mut self.attention_seq);
+                }
+            }
+            let open = matches!(phase, Phase::Active | Phase::Waiting);
+            let previously_open = matches!(previous.0, Phase::Active | Phase::Waiting);
+            if open && (initial || new_input || !previously_open) {
+                turn_started(task, now);
+            }
+            task.turn_open = open;
+            if phase == Phase::Waiting {
+                if task.waiting_since == MIN {
+                    task.waiting_since = at;
+                    if !initial {
+                        set_attention(task, "waiting", now, &self.settings, &mut self.attention_seq);
+                    }
+                }
+            } else {
+                task.waiting_since = MIN;
+            }
+            if !open && settled && (initial || previously_open || new_input) {
+                if initial {
+                    task.terminal = "completed";
+                    task.terminal_at = at;
+                    if at + (self.settings.terminal_hold_seconds * 1000.0) as i64 <= now {
+                        task.exit_started = true;
+                        task.exit_completed = true;
+                    }
+                } else {
+                    if new_input && !previously_open {
+                        turn_started(task, now);
+                        task.turn_open = false;
+                    }
+                    begin_completion(task, String::new(), at, now, &self.settings, &mut self.attention_seq);
+                }
+            }
+            changed |= initial || state_changed || identity_changed || usage_changed || title_changed;
+        }
+        changed
+    }
+
     // ------------------------------------------------------------------ polling
 
     pub fn has_backlog(&self) -> bool {
@@ -819,7 +971,7 @@ impl Engine {
         let keys: Vec<String> = self
             .tasks
             .values()
-            .filter(|t| !t.internal && (t.activity_reference() >= now - window || t.turn_open))
+            .filter(|t| t.source != Source::Antigravity && !t.internal && (t.activity_reference() >= now - window || t.turn_open))
             .map(|t| t.key.clone())
             .collect();
         let mut changed = false;
@@ -913,7 +1065,7 @@ impl Engine {
                     }
                 }
             }
-            Source::Dsh => {}
+            Source::Dsh | Source::Antigravity => {}
         }
         if changed {
             self.revision += 1;
@@ -1162,7 +1314,7 @@ impl Engine {
             initial_scan_complete: self.initial_scan_complete,
             paused: self.paused,
             ledger: self.ledger.view(now),
-            account: self.account_view(),
+            account: self.account_view(now),
         }
     }
 
@@ -1618,6 +1770,13 @@ fn status_of(task: &Task, paused: bool, now: i64, settings: &Settings) -> &'stat
     }
     if task.waiting_since != MIN {
         return "waiting";
+    }
+    if let Some(agy) = &task.antigravity {
+        return match agy.phase {
+            antigravity::Phase::Active => "active",
+            antigravity::Phase::Error => "error",
+            _ => "idle",
+        };
     }
     if task.runtime_activity_at != MIN && now - task.runtime_activity_at <= RUNTIME_FRESH_MS {
         return "active";

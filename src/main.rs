@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 #![deny(unreachable_patterns)]
-//! Agent Monitor HUD — native Windows HUD for Codex and DeepSeek Harness tasks.
+//! Agent Monitor HUD — native Windows HUD for Codex, DeepSeek Harness and Google Antigravity.
 
 mod config;
 mod control;
@@ -45,6 +45,10 @@ fn account_check(source: &str) -> i32 {
             Ok(balance) => serde_json::json!({"ok":true,"balance":engine::dsh_balance::format(&balance)}),
             Err(_) => serde_json::json!({"ok":false,"error":"balance_unavailable"}),
         },
+        "antigravity" => match engine::antigravity_quota::read(&paths.home) {
+            Some(q) => serde_json::json!({"ok":true, "five_hour":q.five_hour.map(|w| w.remaining), "weekly":q.weekly.map(|w| w.remaining)}),
+            None => serde_json::json!({"ok":false, "error":"quota_unavailable"}),
+        },
         _ => return 2,
     };
     let _ = writeln!(std::io::stdout().lock(), "{result}");
@@ -63,6 +67,14 @@ fn speed_check(source: &str, path: &str, as_of: Option<i64>) -> i32 {
         "dsh"=> {
             let Some(p)=engine::dsh::read(path) else { return 2 };
             let mut t=engine::speed::Tracker::default();t.dsh(&p,util::fsx::stamp(path).map(|s|s.write_ms).unwrap_or(p.last_message_at));t.refresh(now);t
+        },
+        "antigravity" => {
+            let mut reader = engine::antigravity::Reader::default();
+            let mut tracker = engine::speed::Tracker::default();
+            if reader.read(path, None, now, &mut tracker).is_none() { return 2; }
+            tracker.tool("antigravity-outside-model", !reader.generating);
+            tracker.refresh(now);
+            tracker
         },
         _=>return 2,
     };
@@ -119,7 +131,7 @@ fn dump() -> i32 {
         let s = t.snapshot.as_ref();
         let _ = writeln!(
             out,
-            "#{:<2} {:<14} {:<10} {:<22} title={:?} model={} ctx={} call={} task={} cost={} ok={}",
+            "#{:<2} {:<14} {:<10} {:<22} title={:?} model={} ctx={} call={} task={} cost={} ok={} cached={} uncached={} output={}",
             t.number,
             t.client,
             t.status,
@@ -131,6 +143,9 @@ fn dump() -> i32 {
             s.map(|s| s.task_total).unwrap_or(0),
             format::cost(s.and_then(|s| s.cost_usd)),
             s.map(|s| s.accounting_ok()).unwrap_or(false),
+            s.map_or(0, |s| s.cached),
+            s.map_or(0, |s| s.uncached),
+            s.map_or(0, |s| s.output),
         );
     }
     if let Some(d) = &view.display {
